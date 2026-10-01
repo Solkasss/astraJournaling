@@ -3,71 +3,79 @@
 @tailwind utilities;
 
 /*
-  AstraJournal design system — dark-only, deep space.
+  AstraJournal design system — dark-only, soft deep-indigo space.
   All colors are HSL triplets consumed as hsl(var(--token) / alpha).
+  Principle: no hard edges, no strong shadows — light, haze, and blur only.
 */
 
 @layer base {
   :root {
-    /* Space foundation (#0B0D1B) */
+    /* Space foundation (#0B0D1B, leaning indigo) */
     --space-deep: 234 42% 7%;
-    --space-indigo: 240 38% 14%;
+    --space-indigo: 242 45% 15%;
+    --space-violet: 262 40% 18%;
 
     /* Star accents — low-intensity glows */
-    --star-lavender: 258 72% 81%;
+    --star-lavender: 258 60% 84%;
     --star-gold: 40 82% 72%;
-    --star-cyan: 190 70% 78%;
+    --star-cyan: 190 60% 82%;
+
+    /* Soft text — icy white & muted violet */
+    --text-icy: 228 45% 92%;
+    --text-soft: 248 30% 80%;
+    --text-faint: 245 18% 62%;
 
     --background: 234 42% 7%;
-    --foreground: 230 45% 93%;
+    --foreground: 228 45% 92%;
 
     --card: 236 38% 11%;
-    --card-foreground: 230 45% 93%;
+    --card-foreground: 228 45% 92%;
 
     --popover: 236 38% 11%;
-    --popover-foreground: 230 45% 93%;
+    --popover-foreground: 228 45% 92%;
 
-    --primary: 258 72% 81%;
+    --primary: 258 60% 84%;
     --primary-foreground: 234 42% 8%;
 
     --secondary: 236 30% 16%;
-    --secondary-foreground: 230 45% 93%;
+    --secondary-foreground: 228 45% 92%;
 
     --muted: 236 28% 15%;
-    --muted-foreground: 232 20% 66%;
+    --muted-foreground: 245 18% 62%;
 
     --accent: 240 30% 18%;
-    --accent-foreground: 230 45% 93%;
+    --accent-foreground: 228 45% 92%;
 
     --destructive: 350 62% 66%;
     --destructive-foreground: 234 42% 8%;
 
     --border: 235 30% 22%;
     --input: 235 30% 20%;
-    --ring: 258 72% 81%;
+    --ring: 258 60% 84%;
 
-    --glass: 236 40% 14%;
+    --glass: 240 40% 70%;
 
-    /* Neon accents — orb + interactive glow */
-    --neon-purple: 268 85% 66%;
-    --neon-indigo: 236 80% 64%;
-    --neon-cyan: 188 90% 60%;
+    /* Nebula accents — kept soft, never neon-harsh */
+    --neon-purple: 266 70% 72%;
+    --neon-indigo: 236 70% 70%;
+    --neon-cyan: 190 75% 70%;
 
-    --radius: 1.25rem;
+    --radius: 2rem;
 
-    --font-display: 'Fraunces', Georgia, serif;
-    --font-body: 'DM Sans', ui-sans-serif, sans-serif;
+    --font-display: 'Outfit', ui-sans-serif, sans-serif;
+    --font-body: 'Outfit', ui-sans-serif, sans-serif;
 
     --ease-calm: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-drift: cubic-bezier(0.22, 1, 0.36, 1);
 
     --sidebar-background: 236 38% 10%;
-    --sidebar-foreground: 230 45% 93%;
-    --sidebar-primary: 258 72% 81%;
+    --sidebar-foreground: 228 45% 92%;
+    --sidebar-primary: 258 60% 84%;
     --sidebar-primary-foreground: 234 42% 8%;
     --sidebar-accent: 240 30% 18%;
-    --sidebar-accent-foreground: 230 45% 93%;
+    --sidebar-accent-foreground: 228 45% 92%;
     --sidebar-border: 235 30% 22%;
-    --sidebar-ring: 258 72% 81%;
+    --sidebar-ring: 258 60% 84%;
   }
 }
 
@@ -82,103 +90,161 @@
   }
 
   body {
-    @apply text-foreground antialiased;
+    @apply antialiased;
+    color: hsl(var(--text-icy));
     font-family: var(--font-body);
+    font-weight: 300;
+    letter-spacing: 0.015em;
   }
 
   ::selection {
-    background: hsl(var(--star-lavender) / 0.3);
+    background: hsl(var(--star-lavender) / 0.22);
   }
 }
 
 @layer components {
+  /* Seamless glass — no border, no drop shadow, edges dissolve into the sky */
   .glass {
-    background: hsl(var(--glass) / 0.42);
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
-    border: 1px solid hsl(var(--foreground) / 0.08);
-    box-shadow:
-      0 18px 50px -20px hsl(var(--space-deep) / 0.9),
-      inset 0 1px 0 hsl(var(--foreground) / 0.05);
+    background: linear-gradient(
+      160deg,
+      hsl(var(--glass) / 0.07),
+      hsl(var(--glass) / 0.025)
+    );
+    backdrop-filter: blur(28px) saturate(120%);
+    -webkit-backdrop-filter: blur(28px) saturate(120%);
+    border: none;
+    box-shadow: none;
+  }
+  .glass-soft {
+    background: hsl(var(--glass) / 0.035);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: none;
+  }
+  .glass-focus {
+    transition: background 1.2s var(--ease-calm);
+  }
+  .glass-focus:focus-within {
+    background: linear-gradient(
+      160deg,
+      hsl(var(--glass) / 0.1),
+      hsl(var(--neon-indigo) / 0.04)
+    );
   }
 
   .sky-bg {
     background:
-      radial-gradient(ellipse 80% 60% at 72% 18%, hsl(var(--space-indigo) / 0.95), transparent 62%),
-      radial-gradient(ellipse 55% 45% at 12% 88%, hsl(var(--star-lavender) / 0.07), transparent 60%),
-      radial-gradient(ellipse 45% 40% at 90% 92%, hsl(var(--star-cyan) / 0.05), transparent 60%),
+      radial-gradient(ellipse 90% 70% at 50% 28%, hsl(var(--space-indigo) / 0.9), transparent 70%),
+      radial-gradient(ellipse 60% 50% at 10% 90%, hsl(var(--space-violet) / 0.55), transparent 65%),
+      radial-gradient(ellipse 50% 45% at 92% 85%, hsl(var(--neon-cyan) / 0.04), transparent 60%),
       hsl(var(--space-deep));
   }
-
   .sky-vignette {
-    background: radial-gradient(ellipse at center, transparent 55%, hsl(var(--space-deep) / 0.8) 100%);
+    background: radial-gradient(ellipse at center, transparent 50%, hsl(var(--space-deep) / 0.75) 100%);
   }
 
-  /* Stars */
+  /* Slow ambient aurora haze */
+  .aurora {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(90px);
+    opacity: 0.5;
+    will-change: transform;
+  }
+  .aurora--violet {
+    background: radial-gradient(circle, hsl(var(--neon-purple) / 0.22), transparent 70%);
+    animation: aurora-drift-a 46s ease-in-out infinite;
+  }
+  .aurora--cyan {
+    background: radial-gradient(circle, hsl(var(--neon-cyan) / 0.14), transparent 70%);
+    animation: aurora-drift-b 58s ease-in-out infinite;
+  }
+
+  /* Stars — faint, slow */
+  .star-layer {
+    animation: star-drift 160s linear infinite alternate;
+  }
   .star {
     position: absolute;
     border-radius: 9999px;
     animation: twinkle ease-in-out infinite;
   }
   .star--lavender {
-    background: hsl(var(--star-lavender));
-    box-shadow: 0 0 6px hsl(var(--star-lavender) / 0.8);
+    background: hsl(var(--star-lavender) / 0.8);
+    box-shadow: 0 0 8px hsl(var(--star-lavender) / 0.45);
   }
   .star--cyan {
-    background: hsl(var(--star-cyan));
-    box-shadow: 0 0 6px hsl(var(--star-cyan) / 0.8);
+    background: hsl(var(--star-cyan) / 0.8);
+    box-shadow: 0 0 8px hsl(var(--star-cyan) / 0.4);
   }
   .star--white {
-    background: hsl(var(--foreground));
-    box-shadow: 0 0 5px hsl(var(--foreground) / 0.7);
+    background: hsl(var(--text-icy) / 0.75);
+    box-shadow: 0 0 6px hsl(var(--text-icy) / 0.35);
+  }
+
+  /* Nebula canvas — edges fade to nothing so there's no visible frame */
+  .nebula-mask {
+    -webkit-mask-image: radial-gradient(circle at center, black 38%, transparent 70%);
+    mask-image: radial-gradient(circle at center, black 38%, transparent 70%);
   }
 
   /* Journal */
-  .glass-focus {
-    transition: border-color 0.4s var(--ease-calm), box-shadow 0.4s var(--ease-calm);
-  }
-  .glass-focus:focus-within {
-    border-color: hsl(var(--neon-purple) / 0.35);
-    box-shadow:
-      0 18px 50px -20px hsl(var(--space-deep) / 0.9),
-      0 0 0 1px hsl(var(--neon-purple) / 0.15),
-      0 0 50px -12px hsl(var(--neon-indigo) / 0.55);
-  }
   .journal-field {
     background: transparent;
-    color: hsl(var(--foreground));
-    caret-color: hsl(var(--neon-cyan));
+    color: hsl(var(--text-icy) / 0.9);
+    caret-color: hsl(var(--star-lavender));
     outline: none;
+    font-weight: 300;
+    letter-spacing: 0.02em;
   }
   .journal-field::placeholder {
-    color: hsl(var(--muted-foreground) / 0.7);
+    color: hsl(var(--text-faint) / 0.6);
+    font-weight: 200;
+  }
+  .text-soft {
+    color: hsl(var(--text-soft));
+  }
+  .text-faint {
+    color: hsl(var(--text-faint));
   }
   .tag-chip {
-    background: hsl(var(--neon-indigo) / 0.15);
-    border: 1px solid hsl(var(--neon-indigo) / 0.35);
-    color: hsl(var(--star-cyan));
+    background: hsl(var(--neon-indigo) / 0.1);
+    color: hsl(var(--star-lavender) / 0.9);
+    transition: background 0.8s var(--ease-calm);
   }
-  .neon-text {
-    color: hsl(var(--neon-cyan));
+  .tag-chip:hover {
+    background: hsl(var(--neon-indigo) / 0.16);
   }
-  .neon-btn {
+  .tag-accent {
+    color: hsl(var(--star-cyan) / 0.75);
+  }
+  .soft-btn {
     background: linear-gradient(
-      135deg,
-      hsl(var(--neon-purple)),
-      hsl(var(--neon-indigo)) 55%,
-      hsl(var(--neon-cyan))
+      120deg,
+      hsl(var(--neon-purple) / 0.22),
+      hsl(var(--neon-indigo) / 0.18) 50%,
+      hsl(var(--neon-cyan) / 0.16)
     );
-    color: hsl(var(--space-deep));
-    box-shadow: 0 8px 30px -8px hsl(var(--neon-purple) / 0.7);
-    transition: transform 0.3s var(--ease-calm), box-shadow 0.3s var(--ease-calm), opacity 0.3s;
+    color: hsl(var(--text-icy));
+    font-weight: 300;
+    letter-spacing: 0.06em;
+    transition: background 1s var(--ease-calm), opacity 1s var(--ease-calm), color 1s var(--ease-calm);
   }
-  .neon-btn:not(:disabled):hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 40px -6px hsl(var(--neon-cyan) / 0.6);
+  .soft-btn:not(:disabled):hover {
+    background: linear-gradient(
+      120deg,
+      hsl(var(--neon-purple) / 0.32),
+      hsl(var(--neon-indigo) / 0.26) 50%,
+      hsl(var(--neon-cyan) / 0.24)
+    );
   }
-  .neon-btn:disabled {
+  .soft-btn:disabled {
     opacity: 0.35;
-    cursor: not-allowed;
+    cursor: default;
+  }
+  .soft-btn:focus-visible {
+    outline: none;
+    background: hsl(var(--neon-indigo) / 0.32);
   }
 
   .scrollbar-none {
@@ -190,11 +256,23 @@
 }
 
 @keyframes twinkle {
-  0%, 100% { opacity: 0.2; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1); }
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 0.7; }
+}
+@keyframes star-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-24px, -36px, 0); }
+}
+@keyframes aurora-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(8vw, 6vh, 0) scale(1.15); }
+}
+@keyframes aurora-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.1); }
+  50% { transform: translate3d(-10vw, -5vh, 0) scale(0.95); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .star { animation: none; }
+  .star, .star-layer, .aurora { animation: none; }
 }
 
 /* Wallet adapter modal — themed to the night sky */
@@ -205,35 +283,34 @@
 
 .wallet-adapter-modal-wrapper {
   background: hsl(var(--card)) !important;
-  border: 1px solid hsl(var(--foreground) / 0.08);
+  border: none;
   border-radius: 1.5rem !important;
-  box-shadow: 0 30px 80px -30px hsl(var(--star-lavender) / 0.35) !important;
+  box-shadow: none !important;
   font-family: var(--font-body) !important;
 }
 
 .wallet-adapter-modal-title {
   font-family: var(--font-display) !important;
-  font-style: italic;
-  font-weight: 400 !important;
-  color: hsl(var(--foreground)) !important;
+  font-weight: 300 !important;
+  color: hsl(var(--text-icy)) !important;
 }
 
 .wallet-adapter-modal-button-close {
-  background: hsl(var(--foreground) / 0.06) !important;
+  background: hsl(var(--text-icy) / 0.06) !important;
 }
 
 .wallet-adapter-modal-list .wallet-adapter-button {
   font-family: var(--font-body) !important;
-  font-weight: 500 !important;
-  color: hsl(var(--foreground)) !important;
+  font-weight: 300 !important;
+  color: hsl(var(--text-icy)) !important;
   border-radius: 1rem !important;
 }
 
 .wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover {
-  background: hsl(var(--foreground) / 0.06) !important;
+  background: hsl(var(--text-icy) / 0.06) !important;
 }
 
 .wallet-adapter-modal-list-more {
-  color: hsl(var(--muted-foreground)) !important;
+  color: hsl(var(--text-faint)) !important;
   font-family: var(--font-body) !important;
 }

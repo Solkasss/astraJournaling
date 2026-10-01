@@ -6,8 +6,8 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
-import { motion, useMotionValue, useSpring, type MotionValue } from 'framer-motion';
-import { Hash, X } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValue, useSpring, type MotionValue } from 'framer-motion';
+import { X } from 'lucide-react';
 import NotFound from './pages/NotFound';
 
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -17,8 +17,9 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 type Entry = { id: number; text: string; tags: string[]; createdAt: number };
 
 const STORAGE_KEY = 'astra-journal-entries';
+const DRIFT = [0.22, 1, 0.36, 1] as const;
 
-/** Deterministic PRNG so the starfield is stable across renders. */
+/** Deterministic PRNG so the starfield and galaxy are stable across renders. */
 const mulberry32 = (seed: number) => () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
@@ -38,16 +39,16 @@ const loadEntries = (): Entry[] => {
     }
 };
 
-/** Typing "energy": spikes on keystrokes, decays smoothly every frame. */
+/** Typing "energy": rises gently on keystrokes, fades slowly — never jumpy. */
 const useTypingEnergy = () => {
     const raw = useMotionValue(0);
-    const energy = useSpring(raw, { stiffness: 140, damping: 18 });
+    const energy = useSpring(raw, { stiffness: 40, damping: 22, mass: 1.4 });
 
     useEffect(() => {
         let id = 0;
         const tick = () => {
             const v = raw.get();
-            if (v > 0.001) raw.set(v * 0.95);
+            if (v > 0.001) raw.set(v * 0.985);
             id = requestAnimationFrame(tick);
         };
         id = requestAnimationFrame(tick);
@@ -58,51 +59,58 @@ const useTypingEnergy = () => {
     return { energy, bump };
 };
 
-/* ---------- Starfield ---------- */
+/* ---------- Atmosphere ---------- */
 
-const StarField = () => {
+const Atmosphere = () => {
     const stars = useMemo(() => {
         const r = mulberry32(11);
         const tones = ['star--lavender', 'star--cyan', 'star--white'];
-        return Array.from({ length: 120 }, (_, i) => ({
+        return Array.from({ length: 90 }, (_, i) => ({
             id: i,
             x: r() * 100,
             y: r() * 100,
-            size: r() < 0.08 ? 2.4 + r() * 1.4 : 0.8 + r() * 1.3,
-            delay: r() * 6,
-            duration: 3 + r() * 5,
+            size: r() < 0.06 ? 2 + r() : 0.6 + r() * 1.1,
+            delay: r() * 10,
+            duration: 6 + r() * 8,
             tone: tones[Math.floor(r() * tones.length)],
         }));
     }, []);
 
     return (
         <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>
-            {stars.map((s) => (
-                <span
-                    key={s.id}
-                    className={`star ${s.tone}`}
-                    style={{
-                        left: `${s.x}%`,
-                        top: `${s.y}%`,
-                        width: s.size,
-                        height: s.size,
-                        animationDelay: `${s.delay}s`,
-                        animationDuration: `${s.duration}s`,
-                    }}
-                />
-            ))}
+            <div className="aurora aurora--violet left-[-15%] top-[5%] size-[70vmax]" />
+            <div className="aurora aurora--cyan bottom-[-25%] right-[-20%] size-[60vmax]" />
+            <div className="star-layer absolute -inset-12">
+                {stars.map((s) => (
+                    <span
+                        key={s.id}
+                        className={`star ${s.tone}`}
+                        style={{
+                            left: `${s.x}%`,
+                            top: `${s.y}%`,
+                            width: s.size,
+                            height: s.size,
+                            animationDelay: `${s.delay}s`,
+                            animationDuration: `${s.duration}s`,
+                        }}
+                    />
+                ))}
+            </div>
+            <div className="sky-vignette absolute inset-0" />
         </div>
     );
 };
 
-/* ---------- Nebula (canvas) ---------- */
+/* ---------- Galaxy (canvas) ---------- */
 
 const TAU = Math.PI * 2;
+const ARMS = 3;
+const TWIST = 4.2; // radians of spiral wind from core to rim
 
-/** Reads an HSL triplet token (e.g. "188 90% 60%") from :root. */
+/** Reads an HSL triplet token (e.g. "190 75% 70%") from :root. */
 const readToken = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-/** Pre-renders a soft radial glow sprite — far cheaper than shadowBlur per particle. */
+/** Pre-rendered soft glow sprite — much cheaper than shadowBlur per particle. */
 const makeSprite = (tone: string, core?: string) => {
     const s = 64;
     const c = document.createElement('canvas');
@@ -110,20 +118,30 @@ const makeSprite = (tone: string, core?: string) => {
     const g = c.getContext('2d');
     if (!g) return c;
     const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    grad.addColorStop(0, `hsl(${core ?? tone} / 1)`);
-    grad.addColorStop(0.18, `hsl(${tone} / 0.75)`);
-    grad.addColorStop(0.5, `hsl(${tone} / 0.16)`);
+    grad.addColorStop(0, `hsl(${core ?? tone} / 0.9)`);
+    grad.addColorStop(0.22, `hsl(${tone} / 0.55)`);
+    grad.addColorStop(0.55, `hsl(${tone} / 0.12)`);
     grad.addColorStop(1, `hsl(${tone} / 0)`);
     g.fillStyle = grad;
     g.fillRect(0, 0, s, s);
     return c;
 };
 
-type Particle = { a: number; r: number; speed: number; phase: number; wf: number; size: number; tone: number; hot: boolean; alpha: number };
-type Cloud = { tone: number; phase: number; orbit: number; size: number; fx: number; fy: number };
-type Spark = { x: number; y: number; vx: number; vy: number; life: number; tone: number; size: number };
+type Mote = {
+    r: number; // normalized radius 0..1
+    off: number; // angular offset along arm
+    sx: number; // perpendicular scatter
+    sy: number;
+    phase: number;
+    wf: number;
+    size: number;
+    tone: number;
+    hot: boolean;
+    alpha: number;
+    lag: number; // per-mote angular drift, gives chaotic shimmer
+};
 
-const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
+const Galaxy = ({ energy }: { energy: MotionValue<number> }) => {
     const ref = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
@@ -132,11 +150,12 @@ const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
         if (!canvas || !ctx) return;
 
         const tones = ['--neon-cyan', '--neon-indigo', '--neon-purple'].map(readToken);
-        const fg = readToken('--foreground');
+        const icy = readToken('--text-icy');
         const dust = tones.map((t) => makeSprite(t));
-        const hot = tones.map((t) => makeSprite(t, fg));
+        const hot = tones.map((t) => makeSprite(t, icy));
+        const coreSprite = makeSprite(readToken('--star-lavender'), icy);
         const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const rand = mulberry32(7);
+        const rand = mulberry32(21);
 
         let w = 0;
         let h = 0;
@@ -153,113 +172,76 @@ const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
         const ro = new ResizeObserver(resize);
         ro.observe(canvas);
 
-        // Swirling dust: inner particles orbit faster (differential rotation), some counter-rotate for chaos.
-        const particles: Particle[] = Array.from({ length: 230 }, () => {
-            const r = Math.pow(rand(), 0.65);
+        // Spiral-arm dust plus a diffuse central bulge.
+        const motes: Mote[] = Array.from({ length: 380 }, (_, i) => {
+            const bulge = rand() < 0.18;
+            const r = bulge ? rand() * 0.22 : 0.08 + Math.pow(rand(), 0.85) * 0.92;
+            const spread = bulge ? 0.14 : 0.05 + r * 0.11;
+            // Inner arms are cyan/indigo, outer arms drift toward violet.
+            const tone = bulge ? Math.floor(rand() * 2) : r < 0.4 ? Math.floor(rand() * 2) : 1 + Math.floor(rand() * 2);
             return {
-                a: rand() * TAU,
                 r,
-                speed: (0.12 + rand() * 0.25) * (1.3 - r) * (rand() < 0.22 ? -1 : 1),
+                off: (i % ARMS) * (TAU / ARMS) + (bulge ? rand() * TAU : (rand() - 0.5) * 0.5),
+                sx: (rand() - 0.5) * 2 * spread,
+                sy: (rand() - 0.5) * 2 * spread,
                 phase: rand() * TAU,
-                wf: 0.4 + rand() * 0.9,
-                size: rand() < 0.15 ? 4 + rand() * 8 : 10 + rand() * 26,
-                tone: Math.floor(rand() * 3),
-                hot: rand() < 0.14,
-                alpha: 0.25 + rand() * 0.55,
+                wf: 0.15 + rand() * 0.35,
+                size: rand() < 0.2 ? 18 + rand() * 30 : 3 + rand() * 9,
+                tone,
+                hot: rand() < 0.12,
+                alpha: 0.18 + rand() * 0.45,
+                lag: (rand() - 0.5) * 0.04,
             };
         });
 
-        // Large, faint plasma clouds that give the matter its fluid body.
-        const clouds: Cloud[] = Array.from({ length: 7 }, (_, i) => ({
-            tone: i % 3,
-            phase: rand() * TAU,
-            orbit: 0.15 + rand() * 0.45,
-            size: 0.7 + rand() * 0.7,
-            fx: 0.15 + rand() * 0.3,
-            fy: 0.12 + rand() * 0.3,
-        }));
-
-        const sparks: Spark[] = [];
         let t = 0;
+        let rot = 0;
         let last = performance.now();
-        let prevE = 0;
         let id = 0;
 
         const frame = (now: number) => {
             const dt = Math.min(0.05, (now - last) / 1000);
             last = now;
             const e = energy.get();
-            const pace = (reduced ? 0.3 : 1) * (1 + e * 2.6);
+            const pace = (reduced ? 0.25 : 1) * (1 + e * 1.1);
             t += dt * pace;
+            rot += dt * 0.045 * pace;
 
             const cx = w / 2;
             const cy = h / 2;
-            const R = Math.min(w, h) * 0.3 * (1 + e * 0.22);
+            const R = Math.min(w, h) * 0.36 * (1 + e * 0.06);
+            const tilt = 0.58 + Math.sin(t * 0.07) * 0.06;
+            const bright = 0.75 + e * 0.45;
 
-            // Fade previous frame instead of clearing → soft motion trails on a transparent canvas.
+            // Fade rather than clear → long, silky trails.
             ctx.globalCompositeOperation = 'destination-out';
-            ctx.globalAlpha = reduced ? 1 : 0.2;
+            ctx.globalAlpha = reduced ? 1 : 0.1;
             ctx.fillRect(0, 0, w, h);
             ctx.globalCompositeOperation = 'lighter';
 
-            for (const c of clouds) {
-                const x = cx + Math.cos(t * c.fx + c.phase) * R * c.orbit + Math.sin(t * 0.6 + c.phase) * R * 0.12;
-                const y = cy + Math.sin(t * c.fy + c.phase * 1.3) * R * c.orbit * 0.8;
-                const s = R * c.size * 2 * (1 + 0.15 * Math.sin(t * 1.1 + c.phase) + e * 0.35);
-                ctx.globalAlpha = 0.07 + e * 0.1;
-                ctx.drawImage(dust[c.tone], x - s / 2, y - s / 2, s, s);
-            }
+            // Breathing core glow.
+            const coreSize = R * (1.15 + 0.08 * Math.sin(t * 0.4)) * (1 + e * 0.15);
+            ctx.globalAlpha = 0.05 + e * 0.04;
+            ctx.drawImage(coreSprite, cx - coreSize / 2, cy - (coreSize * tilt) / 2, coreSize, coreSize * tilt);
 
-            const warp = R * 0.2 * (1 + e * 0.9);
-            for (const p of particles) {
-                p.a += p.speed * dt * pace;
-                const breathe = 1 + 0.2 * Math.sin(t * p.wf + p.phase);
-                const rad = p.r * R * breathe * (1 + e * 0.35);
-                let x = cx + Math.cos(p.a) * rad;
-                let y = cy + Math.sin(p.a) * rad * 0.82;
-                // Pseudo flow-field warp for the organic, liquid drift.
-                x += Math.sin(y * 0.017 + t * 0.9 + p.phase) * warp * 0.5;
-                y += Math.cos(x * 0.015 - t * 0.7) * warp * 0.5;
+            const warp = R * 0.06 * (1 + e * 0.6);
+            for (const m of motes) {
+                m.off += m.lag * dt * pace;
+                const sway = Math.sin(t * m.wf + m.phase) * 0.06;
+                const ang = rot * (1.25 - m.r * 0.5) + m.off + m.r * TWIST + sway;
+                const rad = m.r * R * (1 + 0.04 * Math.sin(t * 0.3 + m.phase));
+                let x = Math.cos(ang) * rad + m.sx * R;
+                let y = Math.sin(ang) * rad + m.sy * R;
+                // Gentle flow-field so the dust never moves in a perfect circle.
+                x += Math.sin(y * 0.02 + t * 0.35 + m.phase) * warp;
+                y += Math.cos(x * 0.018 - t * 0.3) * warp;
 
-                const twinkle = 0.55 + 0.45 * Math.sin(t * 2 + p.phase * 3);
-                ctx.globalAlpha = Math.min(1, p.alpha * twinkle * (0.65 + e * 0.9));
-                const s = p.size * (1 + e * 0.5);
-                ctx.drawImage(p.hot ? hot[p.tone] : dust[p.tone], x - s / 2, y - s / 2, s, s);
-            }
-
-            // Rising energy throws off sparks.
-            const rise = e - prevE;
-            prevE = e;
-            if (!reduced && rise > 0.01 && sparks.length < 140) {
-                const n = Math.min(10, 2 + Math.floor(rise * 120));
-                for (let i = 0; i < n; i++) {
-                    const ang = Math.random() * TAU;
-                    const v = R * (0.5 + Math.random() * 1.3);
-                    const off = R * 0.25 * Math.random();
-                    sparks.push({
-                        x: cx + Math.cos(ang) * off,
-                        y: cy + Math.sin(ang) * off,
-                        vx: Math.cos(ang) * v,
-                        vy: Math.sin(ang) * v * 0.82,
-                        life: 1,
-                        tone: Math.floor(Math.random() * 3),
-                        size: 6 + Math.random() * 10,
-                    });
-                }
-            }
-            for (let i = sparks.length - 1; i >= 0; i--) {
-                const s = sparks[i];
-                s.x += s.vx * dt;
-                s.y += s.vy * dt;
-                s.vx *= 0.97;
-                s.vy *= 0.97;
-                s.life -= dt * 1.1;
-                if (s.life <= 0) {
-                    sparks.splice(i, 1);
-                    continue;
-                }
-                ctx.globalAlpha = s.life;
-                ctx.drawImage(hot[s.tone], s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+                const px = cx + x;
+                const py = cy + y * tilt;
+                const twinkle = 0.6 + 0.4 * Math.sin(t * 0.8 + m.phase * 3);
+                ctx.globalAlpha = Math.min(1, m.alpha * twinkle * bright * (m.size > 16 ? 0.28 : 1));
+                const s = m.size * (1 + e * 0.2);
+                ctx.drawImage(m.hot ? hot[m.tone] : dust[m.tone], px - s / 2, py - s / 2, s, s);
             }
 
             ctx.globalAlpha = 1;
@@ -274,7 +256,7 @@ const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
     }, [energy]);
 
     return (
-        <div className="relative size-[300px] sm:size-[400px]" aria-hidden>
+        <div className="nebula-mask relative size-[340px] sm:size-[480px]" aria-hidden>
             <canvas ref={ref} className="absolute inset-0 size-full" />
         </div>
     );
@@ -290,13 +272,11 @@ const Journal = () => {
     const [tagDraft, setTagDraft] = useState('');
     const [entries, setEntries] = useState<Entry[]>(loadEntries);
 
-    const pulse = bump;
-
     const addTag = (raw: string) => {
         const tag = normalizeTag(raw);
         if (tag && !tags.includes(tag) && tags.length < 8) {
             setTags((t) => [...t, tag]);
-            pulse(0.3);
+            bump(0.15);
         }
         setTagDraft('');
     };
@@ -312,7 +292,7 @@ const Journal = () => {
 
     const onTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
         setText(e.target.value);
-        pulse(0.16 + Math.random() * 0.1);
+        bump(0.06);
     };
 
     const save = () => {
@@ -325,7 +305,7 @@ const Journal = () => {
         setText('');
         setTags([]);
         setTagDraft('');
-        bump(1);
+        bump(0.7);
     };
 
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -333,30 +313,42 @@ const Journal = () => {
 
     return (
         <div className="sky-bg relative min-h-screen overflow-x-hidden">
-            <StarField />
-            <div className="sky-vignette pointer-events-none fixed inset-0" aria-hidden />
+            <Atmosphere />
 
-            <header className="relative z-10 flex items-center justify-between px-6 py-6 sm:px-10">
-                <span className="text-xl italic tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-                    AstraJournal
-                </span>
-                <span className="text-sm text-muted-foreground">{today}</span>
-            </header>
+            <motion.header
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 2, ease: DRIFT }}
+                className="relative z-10 flex items-center justify-between px-6 py-7 sm:px-12"
+            >
+                <span className="text-soft text-sm font-light uppercase tracking-[0.35em]">Astra</span>
+                <span className="text-faint text-xs font-light tracking-[0.12em]">{today}</span>
+            </motion.header>
 
-            <main className="relative z-10 mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-5 pb-20 pt-2 sm:pt-4">
+            <main className="relative z-10 mx-auto flex w-full max-w-xl flex-col items-center px-5 pb-24">
                 <motion.div
-                    initial={{ opacity: 0, scale: 0.85 }}
+                    initial={{ opacity: 0, scale: 0.92 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+                    transition={{ duration: 2.4, ease: DRIFT }}
+                    className="-my-10 sm:-my-14"
                 >
-                    <Nebula energy={energy} />
+                    <Galaxy energy={energy} />
                 </motion.div>
 
+                <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 2, delay: 0.8, ease: DRIFT }}
+                    className="text-faint relative mb-8 text-center text-sm font-extralight tracking-[0.18em]"
+                >
+                    breathe in, let it out
+                </motion.p>
+
                 <motion.section
-                    initial={{ opacity: 0, y: 24 }}
+                    initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.9, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                    className="glass glass-focus w-full rounded-[var(--radius)] p-5 sm:p-6"
+                    transition={{ duration: 1.8, delay: 0.5, ease: DRIFT }}
+                    className="glass glass-focus w-full rounded-[var(--radius)] px-6 py-6 sm:px-8 sm:py-7"
                 >
                     <textarea
                         value={text}
@@ -366,48 +358,60 @@ const Journal = () => {
                         }}
                         placeholder="What's drifting through your mind tonight?"
                         rows={5}
-                        className="journal-field scrollbar-none w-full resize-none text-base leading-relaxed sm:text-lg"
+                        className="journal-field scrollbar-none w-full resize-none text-base leading-loose sm:text-lg"
                         aria-label="Journal entry"
                     />
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-foreground/10 pt-4">
-                        <Hash className="neon-text size-4 shrink-0" aria-hidden />
-                        {tags.map((tag) => (
-                            <span key={tag} className="tag-chip inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs">
-                                #{tag}
-                                <button
-                                    type="button"
-                                    onClick={() => setTags((t) => t.filter((x) => x !== tag))}
-                                    className="opacity-60 transition-opacity hover:opacity-100"
-                                    aria-label={`Remove ${tag}`}
+                    <div className="glass-soft mt-5 flex flex-wrap items-center gap-2 rounded-full px-4 py-2.5">
+                        <span className="tag-accent text-sm font-extralight" aria-hidden>
+                            #
+                        </span>
+                        <AnimatePresence initial={false}>
+                            {tags.map((tag) => (
+                                <motion.span
+                                    key={tag}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    transition={{ duration: 0.6, ease: DRIFT }}
+                                    className="tag-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs tracking-wide"
                                 >
-                                    <X className="size-3" />
-                                </button>
-                            </span>
-                        ))}
+                                    {tag}
+                                    <button
+                                        type="button"
+                                        onClick={() => setTags((t) => t.filter((x) => x !== tag))}
+                                        className="opacity-50 transition-opacity duration-700 hover:opacity-100"
+                                        aria-label={`Remove ${tag}`}
+                                    >
+                                        <X className="size-3" strokeWidth={1.5} />
+                                    </button>
+                                </motion.span>
+                            ))}
+                        </AnimatePresence>
                         <input
                             value={tagDraft}
                             onChange={(e) => {
                                 setTagDraft(e.target.value);
-                                bump(0.08);
+                                bump(0.03);
                             }}
                             onKeyDown={onTagKeyDown}
                             onBlur={() => tagDraft.trim() && addTag(tagDraft)}
-                            placeholder={tags.length ? '' : 'add tags'}
-                            className="journal-field min-w-[6rem] flex-1 text-sm"
+                            placeholder={tags.length ? '' : 'tags'}
+                            className="journal-field min-w-[5rem] flex-1 text-sm"
                             aria-label="Tags"
                         />
                     </div>
 
-                    <div className="mt-5 flex items-center justify-between gap-4">
-                        <span className="text-xs text-muted-foreground">
+                    <div className="mt-6 flex items-center justify-between gap-4">
+                        <span className="text-faint text-xs font-light tracking-[0.12em]">
                             {words} {words === 1 ? 'word' : 'words'}
                         </span>
                         <button
                             type="button"
                             onClick={save}
                             disabled={!text.trim()}
-                            className="neon-btn h-11 rounded-full px-6 text-sm font-semibold"
+                            className="soft-btn h-11 rounded-full px-7 text-sm"
                         >
                             Release to the stars
                         </button>
@@ -415,33 +419,42 @@ const Journal = () => {
                 </motion.section>
 
                 {entries.length > 0 && (
-                    <section className="flex w-full flex-col gap-3">
-                        <h2 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Recent</h2>
-                        {entries.slice(0, 3).map((entry) => (
-                            <motion.article
-                                key={entry.id}
-                                layout
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="glass rounded-2xl px-4 py-3"
-                            >
-                                <p className="line-clamp-2 text-sm text-foreground/90">{entry.text}</p>
-                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                    <span>
-                                        {new Date(entry.createdAt).toLocaleTimeString(undefined, {
-                                            hour: 'numeric',
-                                            minute: '2-digit',
-                                        })}
-                                    </span>
-                                    {entry.tags.map((t) => (
-                                        <span key={t} className="neon-text">
-                                            #{t}
+                    <motion.section
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 2, delay: 1, ease: DRIFT }}
+                        className="mt-12 flex w-full flex-col gap-3"
+                    >
+                        <h2 className="text-faint px-2 text-[11px] font-light uppercase tracking-[0.3em]">Recent</h2>
+                        <AnimatePresence initial={false}>
+                            {entries.slice(0, 3).map((entry) => (
+                                <motion.article
+                                    key={entry.id}
+                                    layout
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 1.2, ease: DRIFT }}
+                                    className="glass-soft rounded-3xl px-5 py-4"
+                                >
+                                    <p className="text-soft line-clamp-2 text-sm font-light leading-relaxed">{entry.text}</p>
+                                    <div className="text-faint mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-light tracking-wide">
+                                        <span>
+                                            {new Date(entry.createdAt).toLocaleTimeString(undefined, {
+                                                hour: 'numeric',
+                                                minute: '2-digit',
+                                            })}
                                         </span>
-                                    ))}
-                                </div>
-                            </motion.article>
-                        ))}
-                    </section>
+                                        {entry.tags.map((t) => (
+                                            <span key={t} className="tag-accent">
+                                                #{t}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </motion.article>
+                            ))}
+                        </AnimatePresence>
+                    </motion.section>
                 )}
             </main>
         </div>
