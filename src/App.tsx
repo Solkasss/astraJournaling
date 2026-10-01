@@ -15,13 +15,12 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 /* ---------- Helpers ---------- */
 
 type Entry = { id: number; text: string; tags: string[]; createdAt: number };
-type RGB = [number, number, number];
 
 const STORAGE_KEY = 'astra-journal-entries';
 const DRIFT = [0.22, 1, 0.36, 1] as const;
 const TAU = Math.PI * 2;
 
-/** Deterministic PRNG so stars and noise are stable across renders. */
+/** Deterministic PRNG so the starfield and galaxy layout are stable across mounts. */
 const mulberry32 = (seed: number) => () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
@@ -41,89 +40,43 @@ const loadEntries = (): Entry[] => {
     }
 };
 
-/** Reads an HSL triplet token (e.g. "270 70% 82%") from :root. */
+/** Reads an HSL triplet token (e.g. "271 91% 65%") from :root. */
 const readToken = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-/** HSL token → RGB, needed for per-pixel color math. */
-const tokenRgb = (name: string): RGB => {
-    const [h, sp, lp] = readToken(name).split(/\s+/).map(parseFloat);
-    const s = sp / 100;
-    const l = lp / 100;
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number) => {
-        const k = (n + h / 30) % 12;
-        return (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255;
-    };
-    return [f(0), f(8), f(4)];
-};
 
 const smoothstep = (a: number, b: number, x: number) => {
     const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
     return t * t * (3 - 2 * t);
 };
 
-/** Classic 2D simplex noise, output ≈ [-1, 1]. */
-const createNoise2D = (rand: () => number) => {
-    const p = new Uint8Array(256).map((_, i) => i);
-    for (let i = 255; i > 0; i--) {
-        const j = Math.floor(rand() * (i + 1));
-        [p[i], p[j]] = [p[j], p[i]];
-    }
-    const perm = new Uint8Array(512);
-    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
-    const GX = [1, -1, 1, -1, 1, -1, 0, 0];
-    const GY = [1, 1, -1, -1, 0, 0, 1, -1];
-    const F2 = 0.5 * (Math.sqrt(3) - 1);
-    const G2 = (3 - Math.sqrt(3)) / 6;
-
-    return (x: number, y: number) => {
-        const s = (x + y) * F2;
-        const i = Math.floor(x + s);
-        const j = Math.floor(y + s);
-        const t = (i + j) * G2;
-        const x0 = x - (i - t);
-        const y0 = y - (j - t);
-        const i1 = x0 > y0 ? 1 : 0;
-        const j1 = 1 - i1;
-        const x1 = x0 - i1 + G2;
-        const y1 = y0 - j1 + G2;
-        const x2 = x0 - 1 + 2 * G2;
-        const y2 = y0 - 1 + 2 * G2;
-        const ii = i & 255;
-        const jj = j & 255;
-        let n = 0;
-        let t0 = 0.5 - x0 * x0 - y0 * y0;
-        if (t0 > 0) {
-            const g = perm[ii + perm[jj]] & 7;
-            t0 *= t0;
-            n += t0 * t0 * (GX[g] * x0 + GY[g] * y0);
-        }
-        let t1 = 0.5 - x1 * x1 - y1 * y1;
-        if (t1 > 0) {
-            const g = perm[ii + i1 + perm[jj + j1]] & 7;
-            t1 *= t1;
-            n += t1 * t1 * (GX[g] * x1 + GY[g] * y1);
-        }
-        let t2 = 0.5 - x2 * x2 - y2 * y2;
-        if (t2 > 0) {
-            const g = perm[ii + 1 + perm[jj + 1]] & 7;
-            t2 *= t2;
-            n += t2 * t2 * (GX[g] * x2 + GY[g] * y2);
-        }
-        return 70 * n;
-    };
+/** Pre-rendered soft dust sprite — a gradient with no edge at all. */
+const makeDust = (tone: string) => {
+    const s = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    if (!g) return c;
+    const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    grad.addColorStop(0, `hsl(${tone} / 0.6)`);
+    grad.addColorStop(0.35, `hsl(${tone} / 0.25)`);
+    grad.addColorStop(0.7, `hsl(${tone} / 0.06)`);
+    grad.addColorStop(1, `hsl(${tone} / 0)`);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, s, s);
+    return c;
 };
 
-/** Soft radial glow sprite for trail particles. */
-const makeSprite = (tone: string, core: string) => {
+/** Pre-rendered star sprite — bright pinpoint with a soft halo. */
+const makeStar = (tone: string, core: string) => {
     const s = 32;
     const c = document.createElement('canvas');
     c.width = c.height = s;
     const g = c.getContext('2d');
     if (!g) return c;
     const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    grad.addColorStop(0, `hsl(${core} / 0.9)`);
-    grad.addColorStop(0.25, `hsl(${tone} / 0.5)`);
+    grad.addColorStop(0, `hsl(${core} / 1)`);
+    grad.addColorStop(0.1, `hsl(${core} / 0.9)`);
+    grad.addColorStop(0.25, `hsl(${tone} / 0.35)`);
+    grad.addColorStop(0.6, `hsl(${tone} / 0.06)`);
     grad.addColorStop(1, `hsl(${tone} / 0)`);
     g.fillStyle = grad;
     g.fillRect(0, 0, s, s);
@@ -192,227 +145,231 @@ const Atmosphere = () => {
     );
 };
 
-/* ---------- Nebula (noise field + particle trails) ---------- */
+/* ---------- Spiral galaxy (logarithmic spiral particle canvas) ---------- */
 
-const PIXEL_BUDGET = 15000; // low-res field, upscaled + blurred → smoke
-const CENTER_Y = 0.42;
-const PARTICLES = 240;
+const ARMS = 3;
+const SPIRAL_A = 0.06; // r = a · e^(bθ), normalized so the arm tip sits at r = 1
+const THETA_MAX = 2.3 * Math.PI;
+const SPIRAL_B = Math.log(1 / SPIRAL_A) / THETA_MAX;
+const TILT = 0.74; // gentle perspective squash of the galactic plane
+const PLANE = -0.38; // diagonal orientation of the plane on screen
+const CENTER_Y = 0.4;
 
-type Mote = { x: number; y: number; life: number; max: number; size: number; tone: number };
+/** Galaxy-plane particle in polar coordinates; alpha already includes radial falloff. */
+type Particle = {
+    r: number;
+    a: number;
+    size: number; // fraction of R for dust, px for stars
+    alpha: number;
+    sprite: HTMLCanvasElement;
+    tw: number; // twinkle speed (0 = steady)
+    ph: number;
+};
 
-const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
-    const wrapRef = useRef<HTMLDivElement>(null);
-    const fieldRef = useRef<HTMLCanvasElement>(null);
-    const trailRef = useRef<HTMLCanvasElement>(null);
+/** Density/brightness falloff: dense core, fading arms, dissolving to nothing by r ≈ 1.45. */
+const falloff = (r: number) => Math.exp(-r * r * 1.3) * (1 - smoothstep(0.9, 1.45, r));
+
+const buildGalaxy = (sprites: {
+    dust: HTMLCanvasElement[]; // [purple, orchid, lavender]
+    coreDust: HTMLCanvasElement;
+    stars: HTMLCanvasElement[]; // [white, orchid, lavender]
+}) => {
+    const rand = mulberry32(2024);
+    const gauss = () => {
+        let u = 0;
+        while (!u) u = rand();
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * rand());
+    };
+    const toPolar = (x: number, y: number) => ({ r: Math.hypot(x, y), a: Math.atan2(y, x) });
+
+    /** A point on arm `k` at spiral angle θ, scattered perpendicular-ish by `spread`. */
+    const armPoint = (k: number, theta: number, spread: number) => {
+        const r = SPIRAL_A * Math.exp(SPIRAL_B * theta);
+        const base = theta + (k * TAU) / ARMS;
+        const s = spread * (0.35 + r);
+        return toPolar(Math.cos(base) * r + gauss() * s, Math.sin(base) * r + gauss() * s);
+    };
+
+    const dust: Particle[] = [];
+    const stars: Particle[] = [];
+
+    // Bulge haze — dense, bright white-lavender.
+    for (let i = 0; i < 70; i++) {
+        const p = toPolar(gauss() * 0.11, gauss() * 0.11);
+        dust.push({ ...p, size: 0.14 + rand() * 0.22, alpha: 0.07 + rand() * 0.06, sprite: sprites.coreDust, tw: 0, ph: rand() * TAU });
+    }
+
+    // Arm dust — medium density purple / orchid clouds.
+    for (let k = 0; k < ARMS; k++) {
+        for (let i = 0; i < 300; i++) {
+            const theta = THETA_MAX * Math.pow(rand(), 0.9);
+            const p = armPoint(k, theta, 0.075);
+            const tone = p.r < 0.3 ? (rand() < 0.6 ? 2 : 1) : rand() < 0.55 ? 0 : 1;
+            dust.push({
+                ...p,
+                size: 0.05 + rand() * 0.13 * (0.6 + p.r),
+                alpha: (0.06 + rand() * 0.1) * falloff(p.r * 0.85),
+                sprite: sprites.dust[tone],
+                tw: 0,
+                ph: rand() * TAU,
+            });
+        }
+    }
+
+    // Sparse outer dust — dissolving into deep space.
+    for (let i = 0; i < 160; i++) {
+        const p = toPolar(gauss() * 0.6, gauss() * 0.6);
+        dust.push({ ...p, size: 0.1 + rand() * 0.2, alpha: 0.03 * falloff(p.r * 0.7), sprite: sprites.dust[rand() < 0.5 ? 0 : 1], tw: 0, ph: rand() * TAU });
+    }
+
+    // Core stars — tightly packed glitter.
+    for (let i = 0; i < 260; i++) {
+        const p = toPolar(gauss() * 0.075, gauss() * 0.075);
+        stars.push({ ...p, size: 2 + rand() * 4, alpha: 0.4 + rand() * 0.5, sprite: sprites.stars[rand() < 0.6 ? 0 : 2], tw: 0.5 + rand() * 1.5, ph: rand() * TAU });
+    }
+
+    // Arm star clusters — little constellations strung along each arm.
+    for (let k = 0; k < ARMS; k++) {
+        for (let c = 0; c < 16; c++) {
+            const theta = THETA_MAX * (0.15 + rand() * 0.85);
+            const centre = armPoint(k, theta, 0.03);
+            const cx = Math.cos(centre.a) * centre.r;
+            const cy = Math.sin(centre.a) * centre.r;
+            const n = 5 + Math.floor(rand() * 10);
+            for (let i = 0; i < n; i++) {
+                const p = toPolar(cx + gauss() * 0.022, cy + gauss() * 0.022);
+                stars.push({
+                    ...p,
+                    size: 2 + rand() * 5,
+                    alpha: (0.45 + rand() * 0.5) * falloff(p.r * 0.7),
+                    sprite: sprites.stars[Math.floor(rand() * 3)],
+                    tw: 0.4 + rand() * 1.4,
+                    ph: rand() * TAU,
+                });
+            }
+        }
+        // Loose stars tracing the arm.
+        for (let i = 0; i < 110; i++) {
+            const p = armPoint(k, THETA_MAX * rand(), 0.06);
+            stars.push({
+                ...p,
+                size: 1.5 + rand() * 3.5,
+                alpha: (0.3 + rand() * 0.5) * falloff(p.r * 0.75),
+                sprite: sprites.stars[Math.floor(rand() * 3)],
+                tw: 0.3 + rand() * 1.2,
+                ph: rand() * TAU,
+            });
+        }
+    }
+
+    // Faint field stars around the galaxy.
+    for (let i = 0; i < 90; i++) {
+        const p = toPolar((rand() * 2 - 1) * 1.4, (rand() * 2 - 1) * 1.4);
+        stars.push({ ...p, size: 1.5 + rand() * 2.5, alpha: 0.25 * falloff(p.r * 0.6), sprite: sprites.stars[0], tw: 0.3 + rand(), ph: rand() * TAU });
+    }
+
+    return { dust, stars };
+};
+
+const SpiralGalaxy = ({ energy }: { energy: MotionValue<number> }) => {
+    const ref = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
-        const wrap = wrapRef.current;
-        const field = fieldRef.current;
-        const trail = trailRef.current;
-        const fctx = field?.getContext('2d');
-        const tctx = trail?.getContext('2d');
-        if (!wrap || !field || !trail || !fctx || !tctx) return;
+        const canvas = ref.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
 
-        const noise = createNoise2D(mulberry32(1337));
-        const violet = tokenRgb('--nebula-violet');
-        const lilac = tokenRgb('--nebula-lilac');
-        const cyan = tokenRgb('--nebula-cyan');
-        const icy = tokenRgb('--text-icy');
-        const icyToken = readToken('--text-icy');
-        const sprites = ['--nebula-cyan', '--nebula-lilac', '--nebula-violet'].map((n) => makeSprite(readToken(n), icyToken));
+        const purple = readToken('--galaxy-purple');
+        const orchid = readToken('--galaxy-orchid');
+        const lavender = readToken('--star-lavender');
+        const core = readToken('--galaxy-core');
+
+        const coreGlow = makeDust(core);
+        const { dust, stars } = buildGalaxy({
+            dust: [makeDust(purple), makeDust(orchid), makeDust(lavender)],
+            coreDust: coreGlow,
+            stars: [makeStar(lavender, core), makeStar(orchid, core), makeStar(purple, core)],
+        });
+
         const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-        const fbm = (x: number, y: number, oct: number) => {
-            let sum = 0;
-            let amp = 0.5;
-            let f = 1;
-            let norm = 0;
-            for (let o = 0; o < oct; o++) {
-                sum += amp * noise(x * f, y * f);
-                norm += amp;
-                amp *= 0.5;
-                f *= 2.03;
-            }
-            return sum / norm;
-        };
+        const cosP = Math.cos(PLANE);
+        const sinP = Math.sin(PLANE);
 
         let w = 0;
         let h = 0;
-        let gw = 0;
-        let gh = 0;
-        let img: ImageData | null = null;
-
         const resize = () => {
-            const rect = wrap.getBoundingClientRect();
+            const rect = canvas.getBoundingClientRect();
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
             w = rect.width;
             h = rect.height;
-            const aspect = w / Math.max(1, h);
-            gh = Math.max(40, Math.round(Math.sqrt(PIXEL_BUDGET / aspect)));
-            gw = Math.max(40, Math.round(gh * aspect));
-            field.width = gw;
-            field.height = gh;
-            img = fctx.createImageData(gw, gh);
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
-            trail.width = Math.round(w * dpr);
-            trail.height = Math.round(h * dpr);
-            tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         };
         resize();
         const ro = new ResizeObserver(resize);
-        ro.observe(wrap);
-
-        /** Domain-warped fbm cloud with an irregular, noise-driven falloff. */
-        const renderField = (t: number, glow: number) => {
-            if (!img) return;
-            const data = img.data;
-            const cxg = gw * 0.5;
-            const cyg = gh * CENTER_Y;
-            const inv = 1 / (Math.min(gw, gh) * 0.5);
-            const coreGain = 0.45 + glow * 0.75;
-            let i = 0;
-
-            for (let y = 0; y < gh; y++) {
-                const ny = (y - cyg) * inv;
-                const v = (y / (gh - 1)) * 2 - 1;
-                const wy = 1 - v * v;
-                for (let x = 0; x < gw; x++, i += 4) {
-                    const nx = (x - cxg) * inv;
-                    const u = (x / (gw - 1)) * 2 - 1;
-                    const win = wy * (1 - u * u);
-                    const win2 = win * win; // guarantees zero at canvas edges
-                    const r = Math.sqrt(nx * nx + ny * ny);
-                    if (win2 < 0.002 || r > 2) {
-                        data[i + 3] = 0;
-                        continue;
-                    }
-
-                    // Slowly evolving warp → matter dissolves and re-forms.
-                    const qx = fbm(nx * 1.3 + t * 0.05, ny * 1.3 - t * 0.035, 2);
-                    const qy = fbm(nx * 1.3 + 5.2 - t * 0.04, ny * 1.3 + 1.7 + t * 0.045, 2);
-
-                    // Irregular radius: the boundary itself is noise, so no circle survives.
-                    const rr = r * (1 + qx * 0.75 + qy * 0.35);
-                    let fall = 1 - rr / 1.05;
-                    if (fall <= 0) {
-                        data[i + 3] = 0;
-                        continue;
-                    }
-                    fall = fall * fall * (3 - 2 * fall);
-
-                    // Static twist near the core gives swirl without rigid rotation.
-                    const tw = 1.4 * Math.exp(-r * 1.6);
-                    const cs = Math.cos(tw);
-                    const sn = Math.sin(tw);
-                    const sx = nx * cs - ny * sn;
-                    const sy = nx * sn + ny * cs;
-
-                    const d = fbm(sx * 1.9 + qx * 1.8 + t * 0.02, sy * 1.9 + qy * 1.8 - t * 0.015, 4) * 0.5 + 0.5;
-                    const clump = smoothstep(0.42, 0.8, d);
-                    const ridge = Math.max(0, 1 - Math.abs(fbm(sx * 3.2 + qy * 2.2, sy * 3.2 + qx * 2.2 + t * 0.03, 2)) * 2.4);
-                    const tendril = ridge * ridge * ridge * ridge;
-                    const core = Math.exp(-rr * rr * 7) * coreGain;
-
-                    let a = (clump * 0.55 + tendril * 0.32 * (0.4 + d)) * fall + core * (0.5 + 0.5 * d);
-                    a = Math.min(1, a * win2);
-
-                    // Violet → lilac → pale cyan, drifting with the warp field.
-                    const cm = Math.max(0, Math.min(1, qy * 0.9 + 0.5 + (d - 0.5) * 0.6));
-                    let cr: number;
-                    let cg: number;
-                    let cb: number;
-                    if (cm < 0.5) {
-                        const k = cm * 2;
-                        cr = violet[0] + (lilac[0] - violet[0]) * k;
-                        cg = violet[1] + (lilac[1] - violet[1]) * k;
-                        cb = violet[2] + (lilac[2] - violet[2]) * k;
-                    } else {
-                        const k = (cm - 0.5) * 2;
-                        cr = lilac[0] + (cyan[0] - lilac[0]) * k;
-                        cg = lilac[1] + (cyan[1] - lilac[1]) * k;
-                        cb = lilac[2] + (cyan[2] - lilac[2]) * k;
-                    }
-                    const hot = Math.min(1, core * 0.8);
-                    data[i] = cr + (icy[0] - cr) * hot;
-                    data[i + 1] = cg + (icy[1] - cg) * hot;
-                    data[i + 2] = cb + (icy[2] - cb) * hot;
-                    data[i + 3] = a * 230;
-                }
-            }
-            fctx.putImageData(img, 0, 0);
-        };
-
-        // Trail motes, advected by a curl-noise flow field.
-        const spawn = (m: Mote, fresh = false) => {
-            const a = Math.random() * TAU;
-            const rad = Math.pow(Math.random(), 1.6) * 0.6;
-            m.x = Math.cos(a) * rad;
-            m.y = Math.sin(a) * rad * 0.8;
-            m.max = 4 + Math.random() * 7;
-            m.life = fresh ? Math.random() * m.max : 0;
-            m.size = 3 + Math.random() * 9;
-            m.tone = Math.floor(Math.random() * 3);
-        };
-        const motes: Mote[] = Array.from({ length: PARTICLES }, () => {
-            const m = { x: 0, y: 0, life: 0, max: 1, size: 1, tone: 0 };
-            spawn(m, true);
-            return m;
-        });
+        ro.observe(canvas);
 
         let t = 0;
-        let acc = 1;
+        let rot = 0;
         let last = performance.now();
         let id = 0;
-        const EPS = 0.01;
-        const FREQ = 1.1;
 
         const frame = (now: number) => {
             const dt = Math.min(0.05, (now - last) / 1000);
             last = now;
             const e = energy.get();
-            const pace = (reduced ? 0.2 : 1) * (1 + e * 1.6);
+            const pace = (reduced ? 0.25 : 1) * (1 + e * 1.4);
             t += dt * pace;
-
-            // Field is slow-moving smoke — 30fps is indistinguishable and halves the cost.
-            acc += dt;
-            if (acc >= 1 / 30) {
-                acc = 0;
-                renderField(t, e);
-            }
+            rot += dt * 0.03 * pace; // ~3.5 minutes per revolution
 
             const cx = w * 0.5;
             const cy = h * CENTER_Y;
-            const S = Math.min(w, h) * 0.5;
+            const R = Math.min(w * 0.44, h * 0.4);
 
-            tctx.globalCompositeOperation = 'destination-out';
-            tctx.globalAlpha = 1 - Math.pow(0.92, dt * 60);
-            tctx.fillRect(0, 0, w, h);
-            tctx.globalCompositeOperation = 'lighter';
+            ctx.clearRect(0, 0, w, h);
+            ctx.globalCompositeOperation = 'lighter';
 
-            const tf = t * 0.04;
-            for (const m of motes) {
-                m.life += dt * pace;
-                const r = Math.sqrt(m.x * m.x + m.y * m.y);
-                if (m.life >= m.max || r > 1.2) {
-                    spawn(m);
-                    continue;
-                }
-                const a1 = noise(m.x * FREQ, (m.y + EPS) * FREQ + tf);
-                const a2 = noise(m.x * FREQ, (m.y - EPS) * FREQ + tf);
-                const b1 = noise((m.x + EPS) * FREQ, m.y * FREQ + tf);
-                const b2 = noise((m.x - EPS) * FREQ, m.y * FREQ + tf);
-                const vx = (a1 - a2) / (2 * EPS);
-                const vy = -(b1 - b2) / (2 * EPS);
-                m.x += (vx * 0.05 + m.x * 0.02) * dt * pace;
-                m.y += (vy * 0.05 + m.y * 0.02) * dt * pace;
+            /** Galaxy-plane polar → screen, with rigid rotation, tilt and diagonal plane. */
+            const project = (r: number, a: number) => {
+                const ang = a + rot;
+                const x = Math.cos(ang) * r * R;
+                const y = Math.sin(ang) * r * R * TILT;
+                return [cx + x * cosP - y * sinP, cy + x * sinP + y * cosP] as const;
+            };
 
-                const fade = Math.sin((Math.PI * m.life) / m.max);
-                const fall = Math.max(0, 1 - r / 1.2);
-                tctx.globalAlpha = fade * fall * 0.5 * (0.7 + e * 0.5);
-                const s = m.size;
-                tctx.drawImage(sprites[m.tone], cx + m.x * S - s / 2, cy + m.y * S - s / 2, s, s);
+            // Wide, soft halo under everything.
+            const halo = R * 1.5 * (1 + e * 0.1);
+            ctx.globalAlpha = 0.14 + e * 0.1;
+            ctx.drawImage(coreGlow, cx - halo / 2, cy - halo / 2, halo, halo);
+
+            for (const p of dust) {
+                const breathe = 1 + 0.02 * Math.sin(t * 0.25 + p.ph);
+                const [x, y] = project(p.r * breathe, p.a);
+                const s = p.size * R;
+                ctx.globalAlpha = Math.min(1, p.alpha * (0.85 + e * 0.35));
+                ctx.drawImage(p.sprite, x - s / 2, y - s / 2, s, s);
             }
 
-            tctx.globalAlpha = 1;
+            for (const p of stars) {
+                const [x, y] = project(p.r, p.a);
+                const twinkle = 0.55 + 0.45 * Math.sin(t * p.tw + p.ph);
+                ctx.globalAlpha = Math.min(1, p.alpha * twinkle * (0.9 + e * 0.3));
+                const s = p.size * 2.4;
+                ctx.drawImage(p.sprite, x - s / 2, y - s / 2, s, s);
+            }
+
+            // Bright, hazy core — glow brightness follows typing energy.
+            const pulse = 1 + 0.04 * Math.sin(t * 0.5);
+            const inner = R * 0.42 * pulse * (1 + e * 0.25);
+            ctx.globalAlpha = Math.min(1, 0.5 + e * 0.4);
+            ctx.drawImage(coreGlow, cx - inner / 2, cy - inner / 2, inner, inner);
+            const hot = inner * 0.38;
+            ctx.globalAlpha = Math.min(1, 0.65 + e * 0.35);
+            ctx.drawImage(coreGlow, cx - hot / 2, cy - hot / 2, hot, hot);
+
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
             id = requestAnimationFrame(frame);
         };
         id = requestAnimationFrame(frame);
@@ -423,12 +380,7 @@ const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
         };
     }, [energy]);
 
-    return (
-        <div ref={wrapRef} className="pointer-events-none absolute inset-0" aria-hidden>
-            <canvas ref={fieldRef} className="nebula-field absolute inset-0 size-full" />
-            <canvas ref={trailRef} className="nebula-trails absolute inset-0 size-full" />
-        </div>
-    );
+    return <canvas ref={ref} className="pointer-events-none absolute inset-0 size-full" aria-hidden />;
 };
 
 /* ---------- Journal ---------- */
@@ -483,12 +435,12 @@ const Journal = () => {
             <Atmosphere />
 
             <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 3, ease: DRIFT }}
                 className="absolute inset-0"
             >
-                <Nebula energy={energy} />
+                <SpiralGalaxy energy={energy} />
             </motion.div>
 
             <motion.header

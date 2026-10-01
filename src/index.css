@@ -60,10 +60,10 @@
     --neon-indigo: 236 70% 70%;
     --neon-cyan: 190 75% 70%;
 
-    /* Nebula matter — lilac, violet, pale cyan */
-    --nebula-lilac: 270 70% 82%;
-    --nebula-violet: 262 62% 60%;
-    --nebula-cyan: 188 72% 80%;
+    /* Spiral galaxy — purple #A855F7, orchid #C084FC, white-lavender core */
+    --galaxy-purple: 271 91% 65%;
+    --galaxy-orchid: 270 95% 75%;
+    --galaxy-core: 262 100% 96%;
 
     --radius: 2rem;
 
@@ -187,13 +187,6 @@
     box-shadow: 0 0 6px hsl(var(--text-icy) / 0.35);
   }
 
-  /* Nebula — low-res noise field upscaled + blurred into smoke */
-  .nebula-field {
-    filter: blur(10px);
-  }
-  .nebula-trails {
-    mix-blend-mode: screen;
-  }
 
   /* Journal */
   .journal-field {
