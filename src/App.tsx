@@ -35,19 +35,43 @@ const mulberry32 = (seed: number) => () => {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-const normalizeTag = (raw: string) =>
-    raw.replace(/^#+/, '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+/**
+ * Unicode-aware tag sanitizer: keeps letters/digits in any script (Cyrillic, Latin, CJK…),
+ * lowercases, and returns the canonical "#tag" form — or '' if nothing usable remains.
+ */
+const normalizeTag = (raw: string) => {
+    const core = raw
+        .replace(/^#+/, '')
+        .toLocaleLowerCase()
+        .replace(/[^\p{L}\p{N}_-]/gu, '')
+        .slice(0, 32);
+    return core ? `#${core}` : '';
+};
 
-const MAX_TAGS = 10;
+const MAX_TAGS = 12;
 
-/** "#dreams #night, thoughts#calm" → ['dreams', 'night', 'thoughts', 'calm'] (deduped). */
-const parseTags = (raw: string) => [...new Set(raw.split(/[\s,#]+/).map(normalizeTag).filter(Boolean))];
+/** "#думки #код" or "думки, код" → ['#думки', '#код'] (deduped). */
+const parseTags = (raw: string) => {
+    const parsed = [...new Set(raw.split(/[\s,;#]+/).map(normalizeTag).filter(Boolean))];
+    // Never drop input entirely — e.g. emoji-only tags fall back to a slug of the raw text.
+    if (!parsed.length && raw.trim()) {
+        const slug = raw.trim().toLocaleLowerCase().replace(/^#+/, '').replace(/[\s,;#]+/g, '-').slice(0, 32);
+        if (slug) return [`#${slug}`];
+    }
+    return parsed;
+};
 
-const mergeTags = (current: string[], incoming: string[]) => [...new Set([...current, ...incoming])].slice(0, MAX_TAGS);
+/** Every inline #hashtag in free text, e.g. "сьогодні #думки про #код" → ['#думки', '#код']. */
+const extractHashtags = (text: string) =>
+    [...new Set((text.match(/#[\p{L}\p{N}_-]+/gu) ?? []).map(normalizeTag).filter(Boolean))];
 
+const mergeTags = (...lists: string[][]) => [...new Set(lists.flat().map(normalizeTag).filter(Boolean))].slice(0, MAX_TAGS);
+
+/** Loads entries and migrates older ones (tags saved without '#', mixed case) to canonical form. */
 const loadEntries = (): Entry[] => {
     try {
-        return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Entry[];
+        const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Entry[];
+        return raw.map((e) => ({ ...e, tags: mergeTags(Array.isArray(e.tags) ? e.tags : [], extractHashtags(e.text ?? '')) }));
     } catch {
         return [];
     }
@@ -412,9 +436,9 @@ type Body = { x: number; y: number; vx: number; vy: number };
 // Force tuning (all scaled by the short side of the viewport, S).
 const REPULSION = 0.0016; // strangers push apart (~1/d²)
 const KIN_REPULSION = 0.3; // stars sharing tags only resist overlapping
-const SPRING = 0.9; // attraction per shared tag
-const REST_MIN = 0.04; // rest length = S · (REST_MIN + REST_SPAN / sharedTags)
-const REST_SPAN = 0.11;
+const SPRING = 2.2; // attraction per shared tag (capped at 3 shared)
+const REST_MIN = 0.03; // rest length = S · (REST_MIN + REST_SPAN / sharedTags²) → 2+ tags pull much closer
+const REST_SPAN = 0.12;
 
 /** Shared-tag counts for every pair, plus the linked pairs and tag groups. */
 const buildGraph = (entries: Entry[]) => {
@@ -422,10 +446,12 @@ const buildGraph = (entries: Entry[]) => {
     const shared = new Uint8Array(n * n);
     const pairs: Link[] = [];
     const byTag = new Map<string, number[]>();
-    const sets = entries.map((e) => new Set(e.tags));
+    // Case-insensitive comparison: canonicalize every tag before matching.
+    const norm = entries.map((e) => mergeTags(e.tags));
+    const sets = norm.map((t) => new Set(t));
 
-    entries.forEach((e, i) =>
-        e.tags.forEach((t) => {
+    norm.forEach((tags, i) =>
+        tags.forEach((t) => {
             const list = byTag.get(t) ?? [];
             list.push(i);
             byTag.set(t, list);
@@ -434,14 +460,14 @@ const buildGraph = (entries: Entry[]) => {
 
     for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
-            const tags = entries[j].tags.filter((t) => sets[i].has(t));
+            const tags = norm[j].filter((t) => sets[i].has(t));
             if (!tags.length) continue;
             shared[i * n + j] = shared[j * n + i] = Math.min(255, tags.length);
             pairs.push({ a: i, b: j, tags });
         }
     }
 
-    return { shared, pairs, byTag };
+    return { shared, pairs, byTag, norm };
 };
 
 const formatDate = (ts: number) =>
@@ -558,7 +584,10 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                     const d = Math.sqrt(d2);
                     const k = graph.shared[i * n + j];
                     let f = (rep * (k ? KIN_REPULSION : 1)) / (d2 + soft2);
-                    if (k) f -= SPRING * k * (d - S * (REST_MIN + REST_SPAN / k));
+                    if (k) {
+                        const kk = Math.min(3, k);
+                        f -= SPRING * kk * (d - S * (REST_MIN + REST_SPAN / (kk * kk)));
+                    }
                     const fx = (dx / d) * f;
                     const fy = (dy / d) * f;
                     ax[i] -= fx;
@@ -606,8 +635,8 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
             pointsRef.current = pts;
 
             const focus = hoverRef.current >= 0 ? hoverRef.current : selectedRef.current;
-            const focusTags = new Set(focus >= 0 ? entries[focus]?.tags ?? [] : []);
-            const related = (i: number) => i === focus || entries[i].tags.some((tg) => focusTags.has(tg));
+            const focusTags = new Set(focus >= 0 ? graph.norm[focus] ?? [] : []);
+            const related = (i: number) => i === focus || graph.norm[i].some((tg) => focusTags.has(tg));
             const hasFocus = focus >= 0;
 
             ctx.clearRect(0, 0, w, h);
@@ -678,7 +707,7 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                     if (!idx.length) return;
                     const cx = idx.reduce((a, i) => a + pts[i].x, 0) / idx.length;
                     const cy = idx.reduce((a, i) => a + pts[i].y, 0) / idx.length;
-                    ctx.fillText(`#${tag}`, cx, cy - (idx.length > 1 ? 18 : 26));
+                    ctx.fillText(tag, cx, cy - (idx.length > 1 ? 18 : 26));
                 });
             }
 
@@ -710,9 +739,9 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
     };
 
     const entry = selected !== null ? entries[selected] : null;
-    const linked = entry
-        ? entries.filter((e) => e !== entry && e.tags.some((tg) => entry.tags.includes(tg))).length
-        : 0;
+    const entryTags = selected !== null ? graph.norm[selected] ?? [] : [];
+    const linked =
+        selected !== null ? graph.pairs.filter((p) => p.a === selected || p.b === selected).length : 0;
 
     return (
         <motion.div
@@ -786,20 +815,22 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                                 {entry.text}
                             </p>
 
-                            {entry.tags.length > 0 && (
+                            {entryTags.length > 0 && (
                                 <div className="mt-6 flex flex-wrap items-center gap-2">
-                                    {entry.tags.map((tag) => (
+                                    {entryTags.map((tag) => (
                                         <span key={tag} className="tag-chip rounded-full px-3 py-1 text-xs tracking-wide">
-                                            #{tag}
+                                            {tag}
                                         </span>
                                     ))}
                                 </div>
                             )}
 
                             <p className="text-faint mt-5 text-xs font-light tracking-[0.12em]">
-                                {linked > 0
-                                    ? `Linked to ${linked} ${linked === 1 ? 'star' : 'stars'} in its constellation`
-                                    : 'A lone star — no shared tags yet'}
+                                {entryTags.length === 0
+                                    ? 'No tags on this star'
+                                    : linked > 0
+                                      ? `Linked to ${linked} ${linked === 1 ? 'star' : 'stars'} through ${entryTags.join(' ')}`
+                                      : `No other stars share ${entryTags.join(' ')} yet`}
                             </p>
                         </motion.article>
                     </motion.div>
@@ -822,7 +853,7 @@ const Journal = () => {
 
     /** Adds every tag found in `raw` (space / comma / # separated). */
     const addTags = (raw: string) => {
-        const incoming = parseTags(raw).filter((t) => !tags.includes(t));
+        const incoming = parseTags(raw);
         if (!incoming.length) return;
         setTags((t) => mergeTags(t, incoming));
         bump(0.1 + 0.05 * incoming.length);
@@ -863,7 +894,8 @@ const Journal = () => {
 
     const save = () => {
         if (!text.trim()) return;
-        const finalTags = mergeTags(tags, parseTags(tagDraft));
+        // Chips + unfinished draft + any inline #hashtags in the entry text.
+        const finalTags = mergeTags(tags, parseTags(tagDraft), extractHashtags(text));
         const entry: Entry = { id: Date.now(), text: text.trim(), tags: finalTags, createdAt: Date.now() };
         const next = [entry, ...entries].slice(0, 100);
         setEntries(next);
