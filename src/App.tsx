@@ -397,42 +397,321 @@ const starPosition = (id: number) => {
     return { x: 8 + r() * 84, y: 16 + r() * 66 };
 };
 
-const SkyMap = ({ entries }: { entries: Entry[] }) => (
-    <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 1.2, ease: DRIFT }}
-        className="absolute inset-0"
-        aria-label="Sky map of saved entries"
-    >
-        {entries.length === 0 ? (
-            <p className="text-faint absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-light tracking-[0.12em]">
-                No stars yet. Write something and release it.
-            </p>
-        ) : (
-            entries.map((entry) => {
-                const { x, y } = starPosition(entry.id);
-                const size = 4 + Math.min(5, entry.text.length / 80);
-                const tagLine = entry.tags.length ? `\n#${entry.tags.join(' #')}` : '';
-                return (
-                    <span
-                        key={entry.id}
-                        title={`${entry.text.slice(0, 120)}${tagLine}`}
-                        className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
-                        style={{
-                            left: `${x}%`,
-                            top: `${y}%`,
-                            width: size,
-                            height: size,
-                            background: 'hsl(var(--galaxy-core))',
-                            boxShadow: '0 0 12px 3px hsl(var(--galaxy-orchid) / 0.55)',
-                        }}
-                    />
-                );
-            })
-        )}
-    </motion.div>
-);
+type Edge = { a: number; b: number; tags: string[] };
+
+/**
+ * Groups entries by hashtag and links each group with a minimum spanning tree,
+ * so every tag forms a natural, non-crossing-looking constellation shape.
+ * Edges shared by several tags are merged.
+ */
+const buildConstellations = (entries: Entry[]) => {
+    const pos = entries.map((e) => starPosition(e.id));
+    const byTag = new Map<string, number[]>();
+    entries.forEach((e, i) =>
+        e.tags.forEach((t) => {
+            const list = byTag.get(t) ?? [];
+            list.push(i);
+            byTag.set(t, list);
+        }),
+    );
+
+    const edges = new Map<string, Edge>();
+    byTag.forEach((idx, tag) => {
+        if (idx.length < 2) return;
+        const tree = new Set([idx[0]]);
+        while (tree.size < idx.length) {
+            let best = Infinity;
+            let ba = -1;
+            let bb = -1;
+            for (const a of tree) {
+                for (const b of idx) {
+                    if (tree.has(b)) continue;
+                    const d = (pos[a].x - pos[b].x) ** 2 + (pos[a].y - pos[b].y) ** 2;
+                    if (d < best) [best, ba, bb] = [d, a, b];
+                }
+            }
+            tree.add(bb);
+            const key = ba < bb ? `${ba}-${bb}` : `${bb}-${ba}`;
+            const existing = edges.get(key);
+            if (existing) existing.tags.push(tag);
+            else edges.set(key, { a: ba, b: bb, tags: [tag] });
+        }
+    });
+
+    return { pos, edges: [...edges.values()], byTag };
+};
+
+const formatDate = (ts: number) =>
+    new Date(ts).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+const SkyMap = ({ entries }: { entries: Entry[] }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const pointsRef = useRef<{ x: number; y: number }[]>([]);
+    const hoverRef = useRef(-1);
+    const selectedRef = useRef(-1);
+    const [selected, setSelected] = useState<number | null>(null);
+    const graph = useMemo(() => buildConstellations(entries), [entries]);
+
+    useEffect(() => {
+        selectedRef.current = selected ?? -1;
+        if (selected === null) return;
+        const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && setSelected(null);
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [selected]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+
+        const core = readToken('--galaxy-core');
+        const orchid = readToken('--galaxy-orchid');
+        const cyan = readToken('--star-cyan');
+        const halos = [makeDust(orchid), makeDust(cyan)];
+        const starSprites = [makeStar(orchid, core), makeStar(cyan, core)];
+        const lineTone = `hsl(${orchid})`;
+        const lineHot = `hsl(${core})`;
+        const labelTone = `hsl(${core} / 0.75)`;
+        const font = getComputedStyle(document.body).fontFamily;
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        const rand = mulberry32(77);
+        const ambient = Array.from({ length: 220 }, () => ({
+            x: rand(),
+            y: rand(),
+            r: rand() < 0.08 ? 1.1 + rand() * 0.6 : 0.4 + rand() * 0.6,
+            ph: rand() * TAU,
+            tw: 0.3 + rand() * 1.2,
+        }));
+        const phases = entries.map((e) => mulberry32(e.id ^ 0x9e37)() * TAU);
+
+        let w = 0;
+        let h = 0;
+        const resize = () => {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            w = rect.width;
+            h = rect.height;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        };
+        resize();
+        const ro = new ResizeObserver(resize);
+        ro.observe(canvas);
+
+        let t = 0;
+        let last = performance.now();
+        let id = 0;
+
+        const frame = (now: number) => {
+            const dt = Math.min(0.05, (now - last) / 1000);
+            last = now;
+            t += dt * (reduced ? 0.25 : 1);
+
+            const pts = graph.pos.map((p) => ({ x: (p.x / 100) * w, y: (p.y / 100) * h }));
+            pointsRef.current = pts;
+
+            const focus = hoverRef.current >= 0 ? hoverRef.current : selectedRef.current;
+            const focusTags = new Set(focus >= 0 ? entries[focus]?.tags ?? [] : []);
+            const related = (i: number) => i === focus || entries[i].tags.some((tg) => focusTags.has(tg));
+            const hasFocus = focus >= 0;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Ambient background stars.
+            ctx.fillStyle = `hsl(${core})`;
+            for (const s of ambient) {
+                ctx.globalAlpha = 0.12 + 0.28 * (0.5 + 0.5 * Math.sin(t * s.tw + s.ph));
+                ctx.beginPath();
+                ctx.arc(s.x * w, s.y * h, s.r, 0, TAU);
+                ctx.fill();
+            }
+
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.lineCap = 'round';
+
+            // Constellation lines — two passes (wide haze + fine filament) for a soft glow.
+            for (const hot of [false, true]) {
+                ctx.beginPath();
+                for (const e of graph.edges) {
+                    const isHot = hasFocus && e.tags.some((tg) => focusTags.has(tg));
+                    if (isHot !== hot) continue;
+                    ctx.moveTo(pts[e.a].x, pts[e.a].y);
+                    ctx.lineTo(pts[e.b].x, pts[e.b].y);
+                }
+                const shimmer = 0.85 + 0.15 * Math.sin(t * 1.4);
+                ctx.strokeStyle = lineTone;
+                ctx.lineWidth = hot ? 6 : 4;
+                ctx.globalAlpha = (hot ? 0.16 : hasFocus ? 0.03 : 0.06) * shimmer;
+                ctx.stroke();
+                ctx.strokeStyle = hot ? lineHot : lineTone;
+                ctx.lineWidth = hot ? 1.2 : 0.8;
+                ctx.globalAlpha = (hot ? 0.7 : hasFocus ? 0.12 : 0.28) * shimmer;
+                ctx.stroke();
+            }
+
+            // Entry stars — pulsing pinpoint over a soft purple / cyan halo.
+            entries.forEach((entry, i) => {
+                const p = pts[i];
+                const pulse = 0.5 + 0.5 * Math.sin(t * 1.1 + phases[i]);
+                const lit = related(i);
+                const dim = hasFocus && !lit ? 0.35 : 1;
+                const tone = entry.id % 2;
+                const base = 1 + Math.min(1.2, entry.text.length / 300);
+
+                const halo = (34 + pulse * 10) * base * (i === focus ? 1.5 : 1);
+                ctx.globalAlpha = (0.35 + pulse * 0.2) * dim;
+                ctx.drawImage(halos[tone], p.x - halo / 2, p.y - halo / 2, halo, halo);
+
+                const s = (16 + pulse * 4) * base * (i === focus ? 1.3 : 1);
+                ctx.globalAlpha = Math.min(1, (0.75 + pulse * 0.25) * dim);
+                ctx.drawImage(starSprites[tone], p.x - s / 2, p.y - s / 2, s, s);
+            });
+
+            // Tag labels at the centroid of each highlighted constellation.
+            ctx.globalCompositeOperation = 'source-over';
+            if (hasFocus) {
+                ctx.font = `300 12px ${font}`;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = labelTone;
+                ctx.globalAlpha = 1;
+                focusTags.forEach((tag) => {
+                    const idx = graph.byTag.get(tag) ?? [];
+                    if (!idx.length) return;
+                    const cx = idx.reduce((a, i) => a + pts[i].x, 0) / idx.length;
+                    const cy = idx.reduce((a, i) => a + pts[i].y, 0) / idx.length;
+                    ctx.fillText(`#${tag}`, cx, cy - (idx.length > 1 ? 18 : 26));
+                });
+            }
+
+            ctx.globalAlpha = 1;
+            id = requestAnimationFrame(frame);
+        };
+        id = requestAnimationFrame(frame);
+
+        return () => {
+            cancelAnimationFrame(id);
+            ro.disconnect();
+        };
+    }, [entries, graph]);
+
+    /** Nearest entry star within a forgiving touch radius. */
+    const pick = (clientX: number, clientY: number) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return -1;
+        const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        let best = 24 * 24;
+        let hit = -1;
+        pointsRef.current.forEach((p, i) => {
+            const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+            if (d < best) [best, hit] = [d, i];
+        });
+        return hit;
+    };
+
+    const entry = selected !== null ? entries[selected] : null;
+    const linked = entry
+        ? entries.filter((e) => e !== entry && e.tags.some((tg) => entry.tags.includes(tg))).length
+        : 0;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1.2, ease: DRIFT }}
+            className="absolute inset-0"
+        >
+            <canvas
+                ref={canvasRef}
+                className="absolute inset-0 size-full"
+                aria-label="Constellation map of saved entries"
+                onPointerMove={(e) => {
+                    hoverRef.current = pick(e.clientX, e.clientY);
+                    e.currentTarget.style.cursor = hoverRef.current >= 0 ? 'pointer' : 'default';
+                }}
+                onPointerLeave={() => (hoverRef.current = -1)}
+                onClick={(e) => {
+                    const hit = pick(e.clientX, e.clientY);
+                    setSelected(hit >= 0 ? hit : null);
+                }}
+            />
+
+            {entries.length === 0 && (
+                <p className="text-faint pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-light tracking-[0.12em]">
+                    No stars yet. Write something and release it.
+                </p>
+            )}
+
+            <AnimatePresence>
+                {entry && (
+                    <motion.div
+                        key="entry-modal"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.5, ease: DRIFT }}
+                        className="fixed inset-0 z-30 flex items-center justify-center px-4"
+                    >
+                        <button
+                            type="button"
+                            aria-label="Close entry"
+                            className="absolute inset-0 bg-background/60 backdrop-blur-sm"
+                            onClick={() => setSelected(null)}
+                        />
+                        <motion.article
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Journal entry"
+                            initial={{ opacity: 0, y: 16, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+                            transition={{ duration: 0.6, ease: DRIFT }}
+                            className="glass relative w-full max-w-lg rounded-[var(--radius)] px-6 py-6 sm:px-8 sm:py-7"
+                        >
+                            <div className="flex items-start justify-between gap-4">
+                                <span className="text-faint text-xs font-light uppercase tracking-[0.2em]">
+                                    {formatDate(entry.createdAt)}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelected(null)}
+                                    className="text-faint -mr-2 -mt-2 grid size-9 place-items-center rounded-full transition-colors duration-500 hover:text-soft"
+                                    aria-label="Close"
+                                >
+                                    <X className="size-4" strokeWidth={1.5} />
+                                </button>
+                            </div>
+
+                            <p className="text-soft scrollbar-none mt-4 max-h-[50dvh] overflow-y-auto whitespace-pre-wrap text-base leading-loose sm:text-lg">
+                                {entry.text}
+                            </p>
+
+                            {entry.tags.length > 0 && (
+                                <div className="mt-6 flex flex-wrap items-center gap-2">
+                                    {entry.tags.map((tag) => (
+                                        <span key={tag} className="tag-chip rounded-full px-3 py-1 text-xs tracking-wide">
+                                            #{tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <p className="text-faint mt-5 text-xs font-light tracking-[0.12em]">
+                                {linked > 0
+                                    ? `Linked to ${linked} ${linked === 1 ? 'star' : 'stars'} in its constellation`
+                                    : 'A lone star — no shared tags yet'}
+                            </p>
+                        </motion.article>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    );
+};
 
 /* ---------- Journal ---------- */
 
