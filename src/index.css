@@ -60,6 +60,11 @@
     --neon-indigo: 236 70% 70%;
     --neon-cyan: 190 75% 70%;
 
+    /* Nebula matter — lilac, violet, pale cyan */
+    --nebula-lilac: 270 70% 82%;
+    --nebula-violet: 262 62% 60%;
+    --nebula-cyan: 188 72% 80%;
+
     --radius: 2rem;
 
     --font-display: 'Outfit', ui-sans-serif, sans-serif;
@@ -134,7 +139,7 @@
 
   .sky-bg {
     background:
-      radial-gradient(ellipse 90% 70% at 50% 28%, hsl(var(--space-indigo) / 0.9), transparent 70%),
+      radial-gradient(ellipse 90% 70% at 50% 35%, hsl(var(--space-indigo) / 0.5), transparent 70%),
       radial-gradient(ellipse 60% 50% at 10% 90%, hsl(var(--space-violet) / 0.55), transparent 65%),
       radial-gradient(ellipse 50% 45% at 92% 85%, hsl(var(--neon-cyan) / 0.04), transparent 60%),
       hsl(var(--space-deep));
@@ -182,10 +187,12 @@
     box-shadow: 0 0 6px hsl(var(--text-icy) / 0.35);
   }
 
-  /* Nebula canvas — edges fade to nothing so there's no visible frame */
-  .nebula-mask {
-    -webkit-mask-image: radial-gradient(circle at center, black 38%, transparent 70%);
-    mask-image: radial-gradient(circle at center, black 38%, transparent 70%);
+  /* Nebula — low-res noise field upscaled + blurred into smoke */
+  .nebula-field {
+    filter: blur(10px);
+  }
+  .nebula-trails {
+    mix-blend-mode: screen;
   }
 
   /* Journal */
