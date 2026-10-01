@@ -247,6 +247,33 @@
     background: hsl(var(--neon-indigo) / 0.32);
   }
 
+  /* View toggle */
+  .nav-tab {
+    color: hsl(var(--text-faint));
+  }
+  .nav-tab:not(:disabled):hover {
+    color: hsl(var(--text-soft));
+  }
+  .nav-tab--active {
+    color: hsl(var(--text-icy));
+  }
+  .nav-pill {
+    background: hsl(var(--glass) / 0.1);
+  }
+
+  /* Star popup — slightly denser glass so text stays legible over the sky */
+  .glass-popup {
+    background: linear-gradient(
+      160deg,
+      hsl(var(--space-indigo) / 0.6),
+      hsl(var(--space-deep) / 0.5)
+    );
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    border: none;
+    box-shadow: 0 0 80px hsl(var(--galaxy-purple) / 0.08);
+  }
+
   .scrollbar-none {
     scrollbar-width: none;
   }

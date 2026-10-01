@@ -15,6 +15,12 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 /* ---------- Helpers ---------- */
 
 type Entry = { id: number; text: string; tags: string[]; createdAt: number };
+type Tab = 'write' | 'sky';
+
+const TABS: { id: Tab; label: string }[] = [
+    { id: 'write', label: 'Write' },
+    { id: 'sky', label: 'Sky Map' },
+];
 
 const STORAGE_KEY = 'astra-journal-entries';
 const DRIFT = [0.22, 1, 0.36, 1] as const;
@@ -383,6 +389,51 @@ const SpiralGalaxy = ({ energy }: { energy: MotionValue<number> }) => {
     return <canvas ref={ref} className="pointer-events-none absolute inset-0 size-full" aria-hidden />;
 };
 
+/* ---------- Sky Map ---------- */
+
+/** Stable position for each saved entry, derived from its id. */
+const starPosition = (id: number) => {
+    const r = mulberry32(id);
+    return { x: 8 + r() * 84, y: 16 + r() * 66 };
+};
+
+const SkyMap = ({ entries }: { entries: Entry[] }) => (
+    <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1.2, ease: DRIFT }}
+        className="absolute inset-0"
+        aria-label="Sky map of saved entries"
+    >
+        {entries.length === 0 ? (
+            <p className="text-faint absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-light tracking-[0.12em]">
+                No stars yet. Write something and release it.
+            </p>
+        ) : (
+            entries.map((entry) => {
+                const { x, y } = starPosition(entry.id);
+                const size = 4 + Math.min(5, entry.text.length / 80);
+                const tagLine = entry.tags.length ? `\n#${entry.tags.join(' #')}` : '';
+                return (
+                    <span
+                        key={entry.id}
+                        title={`${entry.text.slice(0, 120)}${tagLine}`}
+                        className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
+                        style={{
+                            left: `${x}%`,
+                            top: `${y}%`,
+                            width: size,
+                            height: size,
+                            background: 'hsl(var(--galaxy-core))',
+                            boxShadow: '0 0 12px 3px hsl(var(--galaxy-orchid) / 0.55)',
+                        }}
+                    />
+                );
+            })
+        )}
+    </motion.div>
+);
+
 /* ---------- Journal ---------- */
 
 const Journal = () => {
@@ -391,6 +442,8 @@ const Journal = () => {
     const [text, setText] = useState('');
     const [tags, setTags] = useState<string[]>([]);
     const [tagDraft, setTagDraft] = useState('');
+    const [tab, setTab] = useState<Tab>('write');
+    const [entries, setEntries] = useState<Entry[]>(loadEntries);
 
     const addTag = (raw: string) => {
         const tag = normalizeTag(raw);
@@ -420,11 +473,13 @@ const Journal = () => {
         const pending = normalizeTag(tagDraft);
         const finalTags = pending && !tags.includes(pending) ? [...tags, pending] : tags;
         const entry: Entry = { id: Date.now(), text: text.trim(), tags: finalTags, createdAt: Date.now() };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...loadEntries()].slice(0, 100)));
+        const next = [entry, ...entries].slice(0, 100);
+        setEntries(next);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         setText('');
         setTags([]);
         setTagDraft('');
-        bump(0.8);
+        setTab('sky');
     };
 
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -432,16 +487,20 @@ const Journal = () => {
 
     return (
         <div className="sky-bg relative flex h-[100dvh] min-h-[560px] flex-col overflow-hidden">
-            <Atmosphere />
+            {tab === 'write' && <Atmosphere />}
 
-            <motion.div
-                initial={{ opacity: 0, scale: 0.94 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 3, ease: DRIFT }}
-                className="absolute inset-0"
-            >
-                <SpiralGalaxy energy={energy} />
-            </motion.div>
+            {tab === 'write' ? (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.94 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 3, ease: DRIFT }}
+                    className="absolute inset-0"
+                >
+                    <SpiralGalaxy energy={energy} />
+                </motion.div>
+            ) : (
+                <SkyMap entries={entries} />
+            )}
 
             <motion.header
                 initial={{ opacity: 0 }}
@@ -450,11 +509,28 @@ const Journal = () => {
                 className="relative z-10 flex items-center justify-between px-6 py-7 sm:px-12"
             >
                 <span className="text-soft text-sm font-light uppercase tracking-[0.35em]">Astra</span>
-                <span className="text-faint text-xs font-light tracking-[0.12em]">{today}</span>
+                <nav className="glass-soft flex items-center gap-1 rounded-full p-1" role="tablist">
+                    {TABS.map(({ id, label }) => (
+                        <button
+                            key={id}
+                            type="button"
+                            role="tab"
+                            aria-selected={tab === id}
+                            onClick={() => setTab(id)}
+                            className={`h-9 rounded-full px-4 text-xs tracking-[0.12em] transition-colors duration-500 ${
+                                tab === id ? 'tag-chip text-soft' : 'text-faint hover:text-soft'
+                            }`}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </nav>
+                <span className="text-faint hidden text-xs font-light tracking-[0.12em] sm:inline">{today}</span>
             </motion.header>
 
             <div className="flex-1" />
 
+            {tab === 'write' && (
             <motion.section
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -530,6 +606,7 @@ const Journal = () => {
                     </div>
                 </div>
             </motion.section>
+            )}
         </div>
     );
 };
