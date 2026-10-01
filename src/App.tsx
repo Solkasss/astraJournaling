@@ -473,7 +473,38 @@ const buildGraph = (entries: Entry[]) => {
 const formatDate = (ts: number) =>
     new Date(ts).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-const SkyMap = ({ entries }: { entries: Entry[] }) => {
+/** Two-step clear: first click arms it for 3s, second click within that window clears. */
+const ClearButton = ({ onConfirm }: { onConfirm: () => void }) => {
+    const [armed, setArmed] = useState(false);
+
+    useEffect(() => {
+        if (!armed) return;
+        const id = window.setTimeout(() => setArmed(false), 3000);
+        return () => window.clearTimeout(id);
+    }, [armed]);
+
+    return (
+        <button
+            type="button"
+            onClick={() => {
+                if (armed) {
+                    setArmed(false);
+                    onConfirm();
+                } else {
+                    setArmed(true);
+                }
+            }}
+            className={`glass-soft h-11 rounded-full px-5 text-xs tracking-[0.12em] transition-colors duration-500 ${
+                armed ? 'tag-chip text-soft' : 'text-faint hover:text-soft'
+            }`}
+            aria-live="polite"
+        >
+            {armed ? 'Ви точно хочете очистити?' : 'Очистити'}
+        </button>
+    );
+};
+
+const SkyMap = ({ entries, onClear }: { entries: Entry[]; onClear: () => void }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pointsRef = useRef<Body[]>([]);
     const bodiesRef = useRef(new Map<number, Body>());
@@ -500,8 +531,6 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
         const cyan = readToken('--star-cyan');
         const halos = [makeDust(orchid), makeDust(cyan)];
         const starSprites = [makeStar(orchid, core), makeStar(cyan, core)];
-        const lineTone = `hsl(${orchid})`;
-        const lineHot = `hsl(${core})`;
         const labelTone = `hsl(${core} / 0.75)`;
         const font = getComputedStyle(document.body).fontFamily;
         const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -517,6 +546,9 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
         const phases = entries.map((e) => mulberry32(e.id ^ 0x9e37)() * TAU);
         const bodies = bodiesRef.current;
         const n = entries.length;
+        // Drop physics state for stars that no longer exist (e.g. after clearing).
+        const alive = new Set(entries.map((e) => e.id));
+        for (const key of bodies.keys()) if (!alive.has(key)) bodies.delete(key);
 
         let w = 0;
         let h = 0;
@@ -650,32 +682,8 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                 ctx.fill();
             }
 
+            // No connecting lines — clusters emerge purely from the tag-attraction physics.
             ctx.globalCompositeOperation = 'lighter';
-            ctx.lineCap = 'round';
-
-            // Constellation lines — every pair sharing a tag, batched into 6 paths:
-            // strength 1/2/3+ shared tags × (normal | highlighted). More shared tags → wider, brighter.
-            const shimmer = 0.85 + 0.15 * Math.sin(t * 1.4);
-            const paths = Array.from({ length: 6 }, () => new Path2D());
-            for (const link of graph.pairs) {
-                const hot = hasFocus && link.tags.some((tg) => focusTags.has(tg));
-                const path = paths[(hot ? 3 : 0) + Math.min(3, link.tags.length) - 1];
-                path.moveTo(pts[link.a].x, pts[link.a].y);
-                path.lineTo(pts[link.b].x, pts[link.b].y);
-            }
-            paths.forEach((path, idx) => {
-                const hot = idx >= 3;
-                const strength = (idx % 3) + 1;
-                const gain = (hot ? 1.8 : 1) * (hasFocus && !hot ? 0.3 : 1) * shimmer;
-                ctx.strokeStyle = lineTone; // wide haze
-                ctx.lineWidth = 2 + strength * 2;
-                ctx.globalAlpha = Math.min(1, 0.03 * strength * gain);
-                ctx.stroke(path);
-                ctx.strokeStyle = hot || strength === 3 ? lineHot : lineTone; // fine filament
-                ctx.lineWidth = 0.5 + strength * 0.35;
-                ctx.globalAlpha = Math.min(1, (0.1 + 0.12 * strength) * gain);
-                ctx.stroke(path);
-            });
 
             // Entry stars — pulsing pinpoint over a soft purple / cyan halo.
             entries.forEach((entry, i) => {
@@ -765,6 +773,18 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                 }}
             />
 
+            {entries.length > 0 && (
+                <div className="absolute bottom-6 right-6 z-10 sm:bottom-8 sm:right-12">
+                    <ClearButton
+                        onConfirm={() => {
+                            setSelected(null);
+                            hoverRef.current = -1;
+                            onClear();
+                        }}
+                    />
+                </div>
+            )}
+
             {entries.length === 0 && (
                 <p className="text-faint pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-light tracking-[0.12em]">
                     No stars yet. Write something and release it.
@@ -829,7 +849,7 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
                                 {entryTags.length === 0
                                     ? 'No tags on this star'
                                     : linked > 0
-                                      ? `Linked to ${linked} ${linked === 1 ? 'star' : 'stars'} through ${entryTags.join(' ')}`
+                                      ? `Clustered with ${linked} ${linked === 1 ? 'star' : 'stars'} through ${entryTags.join(' ')}`
                                       : `No other stars share ${entryTags.join(' ')} yet`}
                             </p>
                         </motion.article>
@@ -923,7 +943,13 @@ const Journal = () => {
                     <SpiralGalaxy energy={energy} />
                 </motion.div>
             ) : (
-                <SkyMap entries={entries} />
+                <SkyMap
+                    entries={entries}
+                    onClear={() => {
+                        setEntries([]);
+                        localStorage.removeItem(STORAGE_KEY);
+                    }}
+                />
             )}
 
             <motion.header
