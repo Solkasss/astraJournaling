@@ -12,7 +12,25 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        display: ["var(--font-display)"],
+        body: ["var(--font-body)"],
+      },
+      boxShadow: {
+        "glow-gold": "0 0 34px -8px hsl(var(--star-gold) / 0.6)",
+        "glow-lavender": "0 0 30px -8px hsl(var(--star-lavender) / 0.55)",
+        "glow-cyan": "0 0 30px -8px hsl(var(--star-cyan) / 0.5)",
+      },
       colors: {
+        star: {
+          lavender: "hsl(var(--star-lavender) / <alpha-value>)",
+          gold: "hsl(var(--star-gold) / <alpha-value>)",
+          cyan: "hsl(var(--star-cyan) / <alpha-value>)",
+        },
+        space: {
+          deep: "hsl(var(--space-deep) / <alpha-value>)",
+          indigo: "hsl(var(--space-indigo) / <alpha-value>)",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

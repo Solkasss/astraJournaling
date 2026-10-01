@@ -2,95 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
+/*
+  AstraJournal design system — dark-only, deep space.
+  All colors are HSL triplets consumed as hsl(var(--token) / alpha).
 */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Space foundation (#0B0D1B) */
+    --space-deep: 234 42% 7%;
+    --space-indigo: 240 38% 14%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* Star accents — low-intensity glows */
+    --star-lavender: 258 72% 81%;
+    --star-gold: 40 82% 72%;
+    --star-cyan: 190 70% 78%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --background: 234 42% 7%;
+    --foreground: 230 45% 93%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --card: 236 38% 11%;
+    --card-foreground: 230 45% 93%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --popover: 236 38% 11%;
+    --popover-foreground: 230 45% 93%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --primary: 258 72% 81%;
+    --primary-foreground: 234 42% 8%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --secondary: 236 30% 16%;
+    --secondary-foreground: 230 45% 93%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --muted: 236 28% 15%;
+    --muted-foreground: 232 20% 66%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --accent: 240 30% 18%;
+    --accent-foreground: 230 45% 93%;
 
-    --radius: 0.5rem;
+    --destructive: 350 62% 66%;
+    --destructive-foreground: 234 42% 8%;
 
-    --sidebar-background: 0 0% 98%;
+    --border: 235 30% 22%;
+    --input: 235 30% 20%;
+    --ring: 258 72% 81%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --glass: 236 40% 14%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Neon accents — orb + interactive glow */
+    --neon-purple: 268 85% 66%;
+    --neon-indigo: 236 80% 64%;
+    --neon-cyan: 188 90% 60%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    --radius: 1.25rem;
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    --font-display: 'Fraunces', Georgia, serif;
+    --font-body: 'DM Sans', ui-sans-serif, sans-serif;
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    --ease-calm: cubic-bezier(0.4, 0, 0.2, 1);
 
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 236 38% 10%;
+    --sidebar-foreground: 230 45% 93%;
+    --sidebar-primary: 258 72% 81%;
+    --sidebar-primary-foreground: 234 42% 8%;
+    --sidebar-accent: 240 30% 18%;
+    --sidebar-accent-foreground: 230 45% 93%;
+    --sidebar-border: 235 30% 22%;
+    --sidebar-ring: 258 72% 81%;
   }
 }
 
@@ -99,12 +76,231 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html,
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--space-deep));
+  }
+
+  body {
+    @apply text-foreground antialiased;
+    font-family: var(--font-body);
+  }
+
+  ::selection {
+    background: hsl(var(--star-lavender) / 0.3);
   }
 }
 
-/* Wallet button */
-.wallet-adapter-button-trigger {
-  color: #ffffff !important;
+@layer components {
+  .glass {
+    background: hsl(var(--glass) / 0.42);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid hsl(var(--foreground) / 0.08);
+    box-shadow:
+      0 18px 50px -20px hsl(var(--space-deep) / 0.9),
+      inset 0 1px 0 hsl(var(--foreground) / 0.05);
+  }
+
+  .sky-bg {
+    background:
+      radial-gradient(ellipse 80% 60% at 72% 18%, hsl(var(--space-indigo) / 0.95), transparent 62%),
+      radial-gradient(ellipse 55% 45% at 12% 88%, hsl(var(--star-lavender) / 0.07), transparent 60%),
+      radial-gradient(ellipse 45% 40% at 90% 92%, hsl(var(--star-cyan) / 0.05), transparent 60%),
+      hsl(var(--space-deep));
+  }
+
+  .sky-vignette {
+    background: radial-gradient(ellipse at center, transparent 55%, hsl(var(--space-deep) / 0.8) 100%);
+  }
+
+  /* Stars */
+  .star {
+    position: absolute;
+    border-radius: 9999px;
+    animation: twinkle ease-in-out infinite;
+  }
+  .star--lavender {
+    background: hsl(var(--star-lavender));
+    box-shadow: 0 0 6px hsl(var(--star-lavender) / 0.8);
+  }
+  .star--cyan {
+    background: hsl(var(--star-cyan));
+    box-shadow: 0 0 6px hsl(var(--star-cyan) / 0.8);
+  }
+  .star--white {
+    background: hsl(var(--foreground));
+    box-shadow: 0 0 5px hsl(var(--foreground) / 0.7);
+  }
+
+  /* Orb */
+  .orb-glow {
+    background: radial-gradient(
+      circle,
+      hsl(var(--neon-purple) / 0.55) 0%,
+      hsl(var(--neon-indigo) / 0.3) 35%,
+      hsl(var(--neon-cyan) / 0.12) 55%,
+      transparent 70%
+    );
+    filter: blur(30px);
+  }
+  .orb-core {
+    background: radial-gradient(
+      circle at 35% 30%,
+      hsl(var(--foreground) / 0.95) 0%,
+      hsl(var(--neon-cyan) / 0.9) 12%,
+      hsl(var(--neon-indigo)) 42%,
+      hsl(var(--neon-purple)) 72%,
+      hsl(var(--space-indigo)) 100%
+    );
+    box-shadow:
+      0 0 60px hsl(var(--neon-purple) / 0.6),
+      0 0 120px hsl(var(--neon-indigo) / 0.4),
+      inset -20px -30px 60px hsl(var(--space-deep) / 0.6),
+      inset 10px 10px 40px hsl(var(--neon-cyan) / 0.35);
+  }
+  .orb-swirl {
+    background: conic-gradient(
+      from 0deg,
+      transparent,
+      hsl(var(--neon-cyan) / 0.5),
+      transparent 30%,
+      hsl(var(--neon-purple) / 0.55),
+      transparent 60%,
+      hsl(var(--neon-indigo) / 0.55),
+      transparent
+    );
+    mix-blend-mode: screen;
+    filter: blur(14px);
+    animation: orb-spin 14s linear infinite;
+  }
+  .orb-highlight {
+    top: 12%;
+    left: 20%;
+    width: 35%;
+    height: 25%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, hsl(var(--foreground) / 0.55), transparent 70%);
+    filter: blur(6px);
+  }
+  .orb-ring {
+    border: 1px solid hsl(var(--neon-cyan) / 0.6);
+    box-shadow:
+      0 0 20px hsl(var(--neon-purple) / 0.5),
+      inset 0 0 20px hsl(var(--neon-cyan) / 0.3);
+  }
+  .orb-breathe {
+    animation: orb-breathe 6s var(--ease-calm) infinite;
+  }
+
+  /* Journal */
+  .glass-focus {
+    transition: border-color 0.4s var(--ease-calm), box-shadow 0.4s var(--ease-calm);
+  }
+  .glass-focus:focus-within {
+    border-color: hsl(var(--neon-purple) / 0.35);
+    box-shadow:
+      0 18px 50px -20px hsl(var(--space-deep) / 0.9),
+      0 0 0 1px hsl(var(--neon-purple) / 0.15),
+      0 0 50px -12px hsl(var(--neon-indigo) / 0.55);
+  }
+  .journal-field {
+    background: transparent;
+    color: hsl(var(--foreground));
+    caret-color: hsl(var(--neon-cyan));
+    outline: none;
+  }
+  .journal-field::placeholder {
+    color: hsl(var(--muted-foreground) / 0.7);
+  }
+  .tag-chip {
+    background: hsl(var(--neon-indigo) / 0.15);
+    border: 1px solid hsl(var(--neon-indigo) / 0.35);
+    color: hsl(var(--star-cyan));
+  }
+  .neon-text {
+    color: hsl(var(--neon-cyan));
+  }
+  .neon-btn {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--neon-purple)),
+      hsl(var(--neon-indigo)) 55%,
+      hsl(var(--neon-cyan))
+    );
+    color: hsl(var(--space-deep));
+    box-shadow: 0 8px 30px -8px hsl(var(--neon-purple) / 0.7);
+    transition: transform 0.3s var(--ease-calm), box-shadow 0.3s var(--ease-calm), opacity 0.3s;
+  }
+  .neon-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 40px -6px hsl(var(--neon-cyan) / 0.6);
+  }
+  .neon-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@keyframes orb-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star, .orb-swirl, .orb-breathe { animation: none; }
+}
+
+/* Wallet adapter modal — themed to the night sky */
+.wallet-adapter-modal-overlay {
+  background: hsl(var(--space-deep) / 0.72) !important;
+  backdrop-filter: blur(8px);
+}
+
+.wallet-adapter-modal-wrapper {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--foreground) / 0.08);
+  border-radius: 1.5rem !important;
+  box-shadow: 0 30px 80px -30px hsl(var(--star-lavender) / 0.35) !important;
+  font-family: var(--font-body) !important;
+}
+
+.wallet-adapter-modal-title {
+  font-family: var(--font-display) !important;
+  font-style: italic;
+  font-weight: 400 !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.wallet-adapter-modal-button-close {
+  background: hsl(var(--foreground) / 0.06) !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button {
+  font-family: var(--font-body) !important;
+  font-weight: 500 !important;
+  color: hsl(var(--foreground)) !important;
+  border-radius: 1rem !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover {
+  background: hsl(var(--foreground) / 0.06) !important;
+}
+
+.wallet-adapter-modal-list-more {
+  color: hsl(var(--muted-foreground)) !important;
+  font-family: var(--font-body) !important;
 }
