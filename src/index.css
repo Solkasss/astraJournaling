@@ -11,7 +11,7 @@
 @layer base {
   :root {
     /* Space foundation (#0B0D1B, leaning indigo) */
-    --space-deep: 234 42% 7%;
+    --space-deep: 233 42% 7.5%;
     --space-indigo: 242 45% 15%;
     --space-violet: 262 40% 18%;
 
@@ -25,7 +25,7 @@
     --text-soft: 248 30% 80%;
     --text-faint: 245 18% 62%;
 
-    --background: 234 42% 7%;
+    --background: 233 42% 7.5%;
     --foreground: 228 45% 92%;
 
     --card: 236 38% 11%;
