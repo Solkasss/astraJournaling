@@ -7,7 +7,7 @@ import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
 import { AnimatePresence, motion, useMotionValue, useSpring, type MotionValue } from 'framer-motion';
-import { X } from 'lucide-react';
+import { Check, Pencil, Trash2, X } from 'lucide-react';
 import NotFound from './pages/NotFound';
 
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -71,7 +71,11 @@ const mergeTags = (...lists: string[][]) => [...new Set(lists.flat().map(normali
 const loadEntries = (): Entry[] => {
     try {
         const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Entry[];
-        return raw.map((e) => ({ ...e, tags: mergeTags(Array.isArray(e.tags) ? e.tags : [], extractHashtags(e.text ?? '')) }));
+        // Only legacy entries without a tags array fall back to inline #hashtags, so edited tags stick.
+        return raw.map((e) => ({
+            ...e,
+            tags: Array.isArray(e.tags) ? mergeTags(e.tags) : extractHashtags(e.text ?? ''),
+        }));
     } catch {
         return [];
     }
@@ -504,7 +508,113 @@ const ClearButton = ({ onConfirm }: { onConfirm: () => void }) => {
     );
 };
 
-const SkyMap = ({ entries, onClear }: { entries: Entry[]; onClear: () => void }) => {
+/** Inline hashtag editor + delete action shown inside the star modal. */
+const EntryActions = ({
+    tags,
+    onSaveTags,
+    onDelete,
+}: {
+    tags: string[];
+    onSaveTags: (tags: string[]) => void;
+    onDelete: () => void;
+}) => {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+
+    const startEdit = () => {
+        setDraft(tags.join(' '));
+        setEditing(true);
+    };
+    const commit = () => {
+        onSaveTags(mergeTags(parseTags(draft)));
+        setEditing(false);
+    };
+
+    return (
+        <div className="mt-6 flex flex-col gap-4">
+            {editing ? (
+                <div className="glass-soft flex items-center gap-2 rounded-full py-1 pl-4 pr-1">
+                    <input
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                commit();
+                            } else if (e.key === 'Escape') {
+                                e.stopPropagation();
+                                setEditing(false);
+                            }
+                        }}
+                        placeholder="#думки #код"
+                        aria-label="Edit hashtags"
+                        className="text-soft min-w-0 flex-1 bg-transparent text-sm tracking-wide outline-none placeholder:text-muted-foreground/50"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setEditing(false)}
+                        className="text-faint grid size-9 place-items-center rounded-full transition-colors duration-500 hover:text-soft"
+                        aria-label="Cancel editing"
+                    >
+                        <X className="size-4" strokeWidth={1.5} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={commit}
+                        className="tag-chip text-soft grid size-9 place-items-center rounded-full transition-opacity duration-500 hover:opacity-80"
+                        aria-label="Save hashtags"
+                    >
+                        <Check className="size-4" strokeWidth={1.5} />
+                    </button>
+                </div>
+            ) : (
+                tags.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                        {tags.map((tag) => (
+                            <span key={tag} className="tag-chip rounded-full px-3 py-1 text-xs tracking-wide">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                )
+            )}
+
+            {!editing && (
+                <div className="flex items-center justify-between gap-3">
+                    <button
+                        type="button"
+                        onClick={startEdit}
+                        className="glass-soft text-faint inline-flex h-10 items-center gap-2 rounded-full px-4 text-xs tracking-[0.12em] transition-colors duration-500 hover:text-soft"
+                    >
+                        <Pencil className="size-3.5" strokeWidth={1.5} />
+                        Редагувати теги
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onDelete}
+                        className="glass-soft text-faint inline-flex h-10 items-center gap-2 rounded-full px-4 text-xs tracking-[0.12em] transition-colors duration-500 hover:text-destructive"
+                    >
+                        <Trash2 className="size-3.5" strokeWidth={1.5} />
+                        Видалити
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const SkyMap = ({
+    entries,
+    onClear,
+    onDelete,
+    onUpdateTags,
+}: {
+    entries: Entry[];
+    onClear: () => void;
+    onDelete: (id: number) => void;
+    onUpdateTags: (id: number, tags: string[]) => void;
+}) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pointsRef = useRef<Body[]>([]);
     const bodiesRef = useRef(new Map<number, Body>());
@@ -835,15 +945,16 @@ const SkyMap = ({ entries, onClear }: { entries: Entry[]; onClear: () => void })
                                 {entry.text}
                             </p>
 
-                            {entryTags.length > 0 && (
-                                <div className="mt-6 flex flex-wrap items-center gap-2">
-                                    {entryTags.map((tag) => (
-                                        <span key={tag} className="tag-chip rounded-full px-3 py-1 text-xs tracking-wide">
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
+                            <EntryActions
+                                key={entry.id}
+                                tags={entryTags}
+                                onSaveTags={(next) => onUpdateTags(entry.id, next)}
+                                onDelete={() => {
+                                    setSelected(null);
+                                    hoverRef.current = -1;
+                                    onDelete(entry.id);
+                                }}
+                            />
 
                             <p className="text-faint mt-5 text-xs font-light tracking-[0.12em]">
                                 {entryTags.length === 0
@@ -870,6 +981,13 @@ const Journal = () => {
     const [tagDraft, setTagDraft] = useState('');
     const [tab, setTab] = useState<Tab>('write');
     const [entries, setEntries] = useState<Entry[]>(loadEntries);
+
+    /** Updates state and localStorage together. */
+    const persist = (next: Entry[]) => {
+        setEntries(next);
+        if (next.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        else localStorage.removeItem(STORAGE_KEY);
+    };
 
     /** Adds every tag found in `raw` (space / comma / # separated). */
     const addTags = (raw: string) => {
@@ -945,10 +1063,11 @@ const Journal = () => {
             ) : (
                 <SkyMap
                     entries={entries}
-                    onClear={() => {
-                        setEntries([]);
-                        localStorage.removeItem(STORAGE_KEY);
-                    }}
+                    onClear={() => persist([])}
+                    onDelete={(id) => persist(entries.filter((e) => e.id !== id))}
+                    onUpdateTags={(id, next) =>
+                        persist(entries.map((e) => (e.id === id ? { ...e, tags: next } : e)))
+                    }
                 />
             )}
 
