@@ -38,6 +38,13 @@ const mulberry32 = (seed: number) => () => {
 const normalizeTag = (raw: string) =>
     raw.replace(/^#+/, '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
 
+const MAX_TAGS = 10;
+
+/** "#dreams #night, thoughts#calm" → ['dreams', 'night', 'thoughts', 'calm'] (deduped). */
+const parseTags = (raw: string) => [...new Set(raw.split(/[\s,#]+/).map(normalizeTag).filter(Boolean))];
+
+const mergeTags = (current: string[], incoming: string[]) => [...new Set([...current, ...incoming])].slice(0, MAX_TAGS);
+
 const loadEntries = (): Entry[] => {
     try {
         return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Entry[];
@@ -397,16 +404,26 @@ const starPosition = (id: number) => {
     return { x: 8 + r() * 84, y: 16 + r() * 66 };
 };
 
-type Edge = { a: number; b: number; tags: string[] };
+/** A pair of entries that share at least one tag. */
+type Link = { a: number; b: number; tags: string[] };
+/** Physics body for an entry star (pixel space). */
+type Body = { x: number; y: number; vx: number; vy: number };
 
-/**
- * Groups entries by hashtag and links each group with a minimum spanning tree,
- * so every tag forms a natural, non-crossing-looking constellation shape.
- * Edges shared by several tags are merged.
- */
-const buildConstellations = (entries: Entry[]) => {
-    const pos = entries.map((e) => starPosition(e.id));
+// Force tuning (all scaled by the short side of the viewport, S).
+const REPULSION = 0.0016; // strangers push apart (~1/d²)
+const KIN_REPULSION = 0.3; // stars sharing tags only resist overlapping
+const SPRING = 0.9; // attraction per shared tag
+const REST_MIN = 0.04; // rest length = S · (REST_MIN + REST_SPAN / sharedTags)
+const REST_SPAN = 0.11;
+
+/** Shared-tag counts for every pair, plus the linked pairs and tag groups. */
+const buildGraph = (entries: Entry[]) => {
+    const n = entries.length;
+    const shared = new Uint8Array(n * n);
+    const pairs: Link[] = [];
     const byTag = new Map<string, number[]>();
+    const sets = entries.map((e) => new Set(e.tags));
+
     entries.forEach((e, i) =>
         e.tags.forEach((t) => {
             const list = byTag.get(t) ?? [];
@@ -415,30 +432,16 @@ const buildConstellations = (entries: Entry[]) => {
         }),
     );
 
-    const edges = new Map<string, Edge>();
-    byTag.forEach((idx, tag) => {
-        if (idx.length < 2) return;
-        const tree = new Set([idx[0]]);
-        while (tree.size < idx.length) {
-            let best = Infinity;
-            let ba = -1;
-            let bb = -1;
-            for (const a of tree) {
-                for (const b of idx) {
-                    if (tree.has(b)) continue;
-                    const d = (pos[a].x - pos[b].x) ** 2 + (pos[a].y - pos[b].y) ** 2;
-                    if (d < best) [best, ba, bb] = [d, a, b];
-                }
-            }
-            tree.add(bb);
-            const key = ba < bb ? `${ba}-${bb}` : `${bb}-${ba}`;
-            const existing = edges.get(key);
-            if (existing) existing.tags.push(tag);
-            else edges.set(key, { a: ba, b: bb, tags: [tag] });
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const tags = entries[j].tags.filter((t) => sets[i].has(t));
+            if (!tags.length) continue;
+            shared[i * n + j] = shared[j * n + i] = Math.min(255, tags.length);
+            pairs.push({ a: i, b: j, tags });
         }
-    });
+    }
 
-    return { pos, edges: [...edges.values()], byTag };
+    return { shared, pairs, byTag };
 };
 
 const formatDate = (ts: number) =>
@@ -446,11 +449,12 @@ const formatDate = (ts: number) =>
 
 const SkyMap = ({ entries }: { entries: Entry[] }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const pointsRef = useRef<{ x: number; y: number }[]>([]);
+    const pointsRef = useRef<Body[]>([]);
+    const bodiesRef = useRef(new Map<number, Body>());
     const hoverRef = useRef(-1);
     const selectedRef = useRef(-1);
     const [selected, setSelected] = useState<number | null>(null);
-    const graph = useMemo(() => buildConstellations(entries), [entries]);
+    const graph = useMemo(() => buildGraph(entries), [entries]);
 
     useEffect(() => {
         selectedRef.current = selected ?? -1;
@@ -485,9 +489,13 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
             tw: 0.3 + rand() * 1.2,
         }));
         const phases = entries.map((e) => mulberry32(e.id ^ 0x9e37)() * TAU);
+        const bodies = bodiesRef.current;
+        const n = entries.length;
 
         let w = 0;
         let h = 0;
+        let pw = 0;
+        let ph = 0;
         const resize = () => {
             const rect = canvas.getBoundingClientRect();
             const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -496,21 +504,105 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
             canvas.width = Math.round(w * dpr);
             canvas.height = Math.round(h * dpr);
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            // Keep stars where they were, proportionally, when the viewport changes.
+            if (pw && ph) {
+                for (const b of bodies.values()) {
+                    b.x *= w / pw;
+                    b.y *= h / ph;
+                }
+            }
+            pw = w;
+            ph = h;
         };
         resize();
         const ro = new ResizeObserver(resize);
         ro.observe(canvas);
+
+        // One body per entry: existing stars keep their state, new ones appear at their seeded spot.
+        const list = entries.map((e) => {
+            let b = bodies.get(e.id);
+            if (!b) {
+                const p = starPosition(e.id);
+                b = { x: (p.x / 100) * w, y: (p.y / 100) * h, vx: 0, vy: 0 };
+                bodies.set(e.id, b);
+            }
+            return b;
+        });
+        const ax = new Float32Array(n);
+        const ay = new Float32Array(n);
+
+        /** Force-directed step: shared tags attract (springs), strangers repel, soft walls frame the sky. */
+        const step = (dt: number) => {
+            const S = Math.min(w, h);
+            const left = 32;
+            const right = w - 32;
+            const top = 104;
+            const bottom = h - 48;
+            const soft2 = (S * 0.03) ** 2;
+            const rep = S * S * S * REPULSION;
+            ax.fill(0);
+            ay.fill(0);
+
+            for (let i = 0; i < n; i++) {
+                const a = list[i];
+                for (let j = i + 1; j < n; j++) {
+                    const b = list[j];
+                    let dx = b.x - a.x;
+                    let dy = b.y - a.y;
+                    let d2 = dx * dx + dy * dy;
+                    if (d2 < 1e-4) {
+                        dx = Math.random() - 0.5;
+                        dy = Math.random() - 0.5;
+                        d2 = dx * dx + dy * dy;
+                    }
+                    const d = Math.sqrt(d2);
+                    const k = graph.shared[i * n + j];
+                    let f = (rep * (k ? KIN_REPULSION : 1)) / (d2 + soft2);
+                    if (k) f -= SPRING * k * (d - S * (REST_MIN + REST_SPAN / k));
+                    const fx = (dx / d) * f;
+                    const fy = (dy / d) * f;
+                    ax[i] -= fx;
+                    ay[i] -= fy;
+                    ax[j] += fx;
+                    ay[j] += fy;
+                }
+            }
+
+            const damp = Math.pow(0.15, dt);
+            const vmax = S * 0.35;
+            const midY = (top + bottom) / 2;
+            for (let i = 0; i < n; i++) {
+                const b = list[i];
+                let fx = ax[i] + (w / 2 - b.x) * 0.015;
+                let fy = ay[i] + (midY - b.y) * 0.015;
+                if (b.x < left) fx += (left - b.x) * 6;
+                else if (b.x > right) fx -= (b.x - right) * 6;
+                if (b.y < top) fy += (top - b.y) * 6;
+                else if (b.y > bottom) fy -= (b.y - bottom) * 6;
+
+                b.vx = (b.vx + fx * dt) * damp;
+                b.vy = (b.vy + fy * dt) * damp;
+                const sp = Math.hypot(b.vx, b.vy);
+                if (sp > vmax) {
+                    b.vx *= vmax / sp;
+                    b.vy *= vmax / sp;
+                }
+                b.x += b.vx * dt;
+                b.y += b.vy * dt;
+            }
+        };
 
         let t = 0;
         let last = performance.now();
         let id = 0;
 
         const frame = (now: number) => {
-            const dt = Math.min(0.05, (now - last) / 1000);
+            const dt = Math.min(1 / 30, (now - last) / 1000);
             last = now;
             t += dt * (reduced ? 0.25 : 1);
 
-            const pts = graph.pos.map((p) => ({ x: (p.x / 100) * w, y: (p.y / 100) * h }));
+            step(dt);
+            const pts = list;
             pointsRef.current = pts;
 
             const focus = hoverRef.current >= 0 ? hoverRef.current : selectedRef.current;
@@ -532,25 +624,29 @@ const SkyMap = ({ entries }: { entries: Entry[] }) => {
             ctx.globalCompositeOperation = 'lighter';
             ctx.lineCap = 'round';
 
-            // Constellation lines — two passes (wide haze + fine filament) for a soft glow.
-            for (const hot of [false, true]) {
-                ctx.beginPath();
-                for (const e of graph.edges) {
-                    const isHot = hasFocus && e.tags.some((tg) => focusTags.has(tg));
-                    if (isHot !== hot) continue;
-                    ctx.moveTo(pts[e.a].x, pts[e.a].y);
-                    ctx.lineTo(pts[e.b].x, pts[e.b].y);
-                }
-                const shimmer = 0.85 + 0.15 * Math.sin(t * 1.4);
-                ctx.strokeStyle = lineTone;
-                ctx.lineWidth = hot ? 6 : 4;
-                ctx.globalAlpha = (hot ? 0.16 : hasFocus ? 0.03 : 0.06) * shimmer;
-                ctx.stroke();
-                ctx.strokeStyle = hot ? lineHot : lineTone;
-                ctx.lineWidth = hot ? 1.2 : 0.8;
-                ctx.globalAlpha = (hot ? 0.7 : hasFocus ? 0.12 : 0.28) * shimmer;
-                ctx.stroke();
+            // Constellation lines — every pair sharing a tag, batched into 6 paths:
+            // strength 1/2/3+ shared tags × (normal | highlighted). More shared tags → wider, brighter.
+            const shimmer = 0.85 + 0.15 * Math.sin(t * 1.4);
+            const paths = Array.from({ length: 6 }, () => new Path2D());
+            for (const link of graph.pairs) {
+                const hot = hasFocus && link.tags.some((tg) => focusTags.has(tg));
+                const path = paths[(hot ? 3 : 0) + Math.min(3, link.tags.length) - 1];
+                path.moveTo(pts[link.a].x, pts[link.a].y);
+                path.lineTo(pts[link.b].x, pts[link.b].y);
             }
+            paths.forEach((path, idx) => {
+                const hot = idx >= 3;
+                const strength = (idx % 3) + 1;
+                const gain = (hot ? 1.8 : 1) * (hasFocus && !hot ? 0.3 : 1) * shimmer;
+                ctx.strokeStyle = lineTone; // wide haze
+                ctx.lineWidth = 2 + strength * 2;
+                ctx.globalAlpha = Math.min(1, 0.03 * strength * gain);
+                ctx.stroke(path);
+                ctx.strokeStyle = hot || strength === 3 ? lineHot : lineTone; // fine filament
+                ctx.lineWidth = 0.5 + strength * 0.35;
+                ctx.globalAlpha = Math.min(1, (0.1 + 0.12 * strength) * gain);
+                ctx.stroke(path);
+            });
 
             // Entry stars — pulsing pinpoint over a soft purple / cyan halo.
             entries.forEach((entry, i) => {
@@ -724,19 +820,37 @@ const Journal = () => {
     const [tab, setTab] = useState<Tab>('write');
     const [entries, setEntries] = useState<Entry[]>(loadEntries);
 
-    const addTag = (raw: string) => {
-        const tag = normalizeTag(raw);
-        if (tag && !tags.includes(tag) && tags.length < 8) {
-            setTags((t) => [...t, tag]);
-            bump(0.15);
+    /** Adds every tag found in `raw` (space / comma / # separated). */
+    const addTags = (raw: string) => {
+        const incoming = parseTags(raw).filter((t) => !tags.includes(t));
+        if (!incoming.length) return;
+        setTags((t) => mergeTags(t, incoming));
+        bump(0.1 + 0.05 * incoming.length);
+    };
+
+    /** Commits every finished token as you type or paste; the trailing fragment stays as a draft. */
+    const onTagChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        bump(0.03);
+        const match = value.match(/^(.*[\s,])([^\s,]*)$/);
+        if (match) {
+            addTags(match[1]);
+            setTagDraft(match[2]);
+        } else {
+            setTagDraft(value);
         }
+    };
+
+    const commitDraft = () => {
+        if (!tagDraft.trim()) return;
+        addTags(tagDraft);
         setTagDraft('');
     };
 
     const onTagKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-        if (['Enter', ',', ' ', 'Tab'].includes(e.key) && tagDraft.trim()) {
+        if (e.key === 'Enter' && tagDraft.trim()) {
             e.preventDefault();
-            addTag(tagDraft);
+            commitDraft();
         } else if (e.key === 'Backspace' && !tagDraft && tags.length) {
             setTags((t) => t.slice(0, -1));
         }
@@ -749,8 +863,7 @@ const Journal = () => {
 
     const save = () => {
         if (!text.trim()) return;
-        const pending = normalizeTag(tagDraft);
-        const finalTags = pending && !tags.includes(pending) ? [...tags, pending] : tags;
+        const finalTags = mergeTags(tags, parseTags(tagDraft));
         const entry: Entry = { id: Date.now(), text: text.trim(), tags: finalTags, createdAt: Date.now() };
         const next = [entry, ...entries].slice(0, 100);
         setEntries(next);
@@ -858,13 +971,10 @@ const Journal = () => {
                         </AnimatePresence>
                         <input
                             value={tagDraft}
-                            onChange={(e) => {
-                                setTagDraft(e.target.value);
-                                bump(0.03);
-                            }}
+                            onChange={onTagChange}
                             onKeyDown={onTagKeyDown}
-                            onBlur={() => tagDraft.trim() && addTag(tagDraft)}
-                            placeholder={tags.length ? '' : 'tags'}
+                            onBlur={commitDraft}
+                            placeholder={tags.length ? '' : '#dreams #night #thoughts'}
                             className="journal-field min-w-[5rem] flex-1 text-sm"
                             aria-label="Tags"
                         />
