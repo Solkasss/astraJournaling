@@ -6,7 +6,7 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
-import { motion, useMotionValue, useSpring, useTransform, type MotionValue } from 'framer-motion';
+import { motion, useMotionValue, useSpring, type MotionValue } from 'framer-motion';
 import { Hash, X } from 'lucide-react';
 import NotFound from './pages/NotFound';
 
@@ -95,42 +95,187 @@ const StarField = () => {
     );
 };
 
-/* ---------- Orb ---------- */
+/* ---------- Nebula (canvas) ---------- */
 
-const Orb = ({ energy, ripples }: { energy: MotionValue<number>; ripples: number[] }) => {
-    const coreScale = useTransform(energy, [0, 1], [1, 1.14]);
-    const glowScale = useTransform(energy, [0, 1], [1, 1.6]);
-    const glowOpacity = useTransform(energy, [0, 1], [0.55, 1]);
-    const filter = useTransform(
-        energy,
-        [0, 1],
-        ['hue-rotate(0deg) saturate(1) brightness(1)', 'hue-rotate(-55deg) saturate(1.35) brightness(1.15)'],
-    );
+const TAU = Math.PI * 2;
+
+/** Reads an HSL triplet token (e.g. "188 90% 60%") from :root. */
+const readToken = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/** Pre-renders a soft radial glow sprite — far cheaper than shadowBlur per particle. */
+const makeSprite = (tone: string, core?: string) => {
+    const s = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    if (!g) return c;
+    const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    grad.addColorStop(0, `hsl(${core ?? tone} / 1)`);
+    grad.addColorStop(0.18, `hsl(${tone} / 0.75)`);
+    grad.addColorStop(0.5, `hsl(${tone} / 0.16)`);
+    grad.addColorStop(1, `hsl(${tone} / 0)`);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, s, s);
+    return c;
+};
+
+type Particle = { a: number; r: number; speed: number; phase: number; wf: number; size: number; tone: number; hot: boolean; alpha: number };
+type Cloud = { tone: number; phase: number; orbit: number; size: number; fx: number; fy: number };
+type Spark = { x: number; y: number; vx: number; vy: number; life: number; tone: number; size: number };
+
+const Nebula = ({ energy }: { energy: MotionValue<number> }) => {
+    const ref = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        const canvas = ref.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+
+        const tones = ['--neon-cyan', '--neon-indigo', '--neon-purple'].map(readToken);
+        const fg = readToken('--foreground');
+        const dust = tones.map((t) => makeSprite(t));
+        const hot = tones.map((t) => makeSprite(t, fg));
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const rand = mulberry32(7);
+
+        let w = 0;
+        let h = 0;
+        const resize = () => {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            w = rect.width;
+            h = rect.height;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        };
+        resize();
+        const ro = new ResizeObserver(resize);
+        ro.observe(canvas);
+
+        // Swirling dust: inner particles orbit faster (differential rotation), some counter-rotate for chaos.
+        const particles: Particle[] = Array.from({ length: 230 }, () => {
+            const r = Math.pow(rand(), 0.65);
+            return {
+                a: rand() * TAU,
+                r,
+                speed: (0.12 + rand() * 0.25) * (1.3 - r) * (rand() < 0.22 ? -1 : 1),
+                phase: rand() * TAU,
+                wf: 0.4 + rand() * 0.9,
+                size: rand() < 0.15 ? 4 + rand() * 8 : 10 + rand() * 26,
+                tone: Math.floor(rand() * 3),
+                hot: rand() < 0.14,
+                alpha: 0.25 + rand() * 0.55,
+            };
+        });
+
+        // Large, faint plasma clouds that give the matter its fluid body.
+        const clouds: Cloud[] = Array.from({ length: 7 }, (_, i) => ({
+            tone: i % 3,
+            phase: rand() * TAU,
+            orbit: 0.15 + rand() * 0.45,
+            size: 0.7 + rand() * 0.7,
+            fx: 0.15 + rand() * 0.3,
+            fy: 0.12 + rand() * 0.3,
+        }));
+
+        const sparks: Spark[] = [];
+        let t = 0;
+        let last = performance.now();
+        let prevE = 0;
+        let id = 0;
+
+        const frame = (now: number) => {
+            const dt = Math.min(0.05, (now - last) / 1000);
+            last = now;
+            const e = energy.get();
+            const pace = (reduced ? 0.3 : 1) * (1 + e * 2.6);
+            t += dt * pace;
+
+            const cx = w / 2;
+            const cy = h / 2;
+            const R = Math.min(w, h) * 0.3 * (1 + e * 0.22);
+
+            // Fade previous frame instead of clearing → soft motion trails on a transparent canvas.
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.globalAlpha = reduced ? 1 : 0.2;
+            ctx.fillRect(0, 0, w, h);
+            ctx.globalCompositeOperation = 'lighter';
+
+            for (const c of clouds) {
+                const x = cx + Math.cos(t * c.fx + c.phase) * R * c.orbit + Math.sin(t * 0.6 + c.phase) * R * 0.12;
+                const y = cy + Math.sin(t * c.fy + c.phase * 1.3) * R * c.orbit * 0.8;
+                const s = R * c.size * 2 * (1 + 0.15 * Math.sin(t * 1.1 + c.phase) + e * 0.35);
+                ctx.globalAlpha = 0.07 + e * 0.1;
+                ctx.drawImage(dust[c.tone], x - s / 2, y - s / 2, s, s);
+            }
+
+            const warp = R * 0.2 * (1 + e * 0.9);
+            for (const p of particles) {
+                p.a += p.speed * dt * pace;
+                const breathe = 1 + 0.2 * Math.sin(t * p.wf + p.phase);
+                const rad = p.r * R * breathe * (1 + e * 0.35);
+                let x = cx + Math.cos(p.a) * rad;
+                let y = cy + Math.sin(p.a) * rad * 0.82;
+                // Pseudo flow-field warp for the organic, liquid drift.
+                x += Math.sin(y * 0.017 + t * 0.9 + p.phase) * warp * 0.5;
+                y += Math.cos(x * 0.015 - t * 0.7) * warp * 0.5;
+
+                const twinkle = 0.55 + 0.45 * Math.sin(t * 2 + p.phase * 3);
+                ctx.globalAlpha = Math.min(1, p.alpha * twinkle * (0.65 + e * 0.9));
+                const s = p.size * (1 + e * 0.5);
+                ctx.drawImage(p.hot ? hot[p.tone] : dust[p.tone], x - s / 2, y - s / 2, s, s);
+            }
+
+            // Rising energy throws off sparks.
+            const rise = e - prevE;
+            prevE = e;
+            if (!reduced && rise > 0.01 && sparks.length < 140) {
+                const n = Math.min(10, 2 + Math.floor(rise * 120));
+                for (let i = 0; i < n; i++) {
+                    const ang = Math.random() * TAU;
+                    const v = R * (0.5 + Math.random() * 1.3);
+                    const off = R * 0.25 * Math.random();
+                    sparks.push({
+                        x: cx + Math.cos(ang) * off,
+                        y: cy + Math.sin(ang) * off,
+                        vx: Math.cos(ang) * v,
+                        vy: Math.sin(ang) * v * 0.82,
+                        life: 1,
+                        tone: Math.floor(Math.random() * 3),
+                        size: 6 + Math.random() * 10,
+                    });
+                }
+            }
+            for (let i = sparks.length - 1; i >= 0; i--) {
+                const s = sparks[i];
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+                s.vx *= 0.97;
+                s.vy *= 0.97;
+                s.life -= dt * 1.1;
+                if (s.life <= 0) {
+                    sparks.splice(i, 1);
+                    continue;
+                }
+                ctx.globalAlpha = s.life;
+                ctx.drawImage(hot[s.tone], s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+            }
+
+            ctx.globalAlpha = 1;
+            id = requestAnimationFrame(frame);
+        };
+        id = requestAnimationFrame(frame);
+
+        return () => {
+            cancelAnimationFrame(id);
+            ro.disconnect();
+        };
+    }, [energy]);
 
     return (
-        <div className="relative grid size-[200px] place-items-center sm:size-[260px]">
-            <motion.div
-                className="orb-glow absolute -inset-[45%] rounded-full"
-                style={{ scale: glowScale, opacity: glowOpacity }}
-            />
-            {ripples.map((id) => (
-                <motion.span
-                    key={id}
-                    className="orb-ring absolute inset-0 rounded-full"
-                    initial={{ scale: 0.9, opacity: 0.75 }}
-                    animate={{ scale: 2, opacity: 0 }}
-                    transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
-                />
-            ))}
-            <div className="orb-breathe relative size-full">
-                <motion.div
-                    className="orb-core absolute inset-0 overflow-hidden rounded-full"
-                    style={{ scale: coreScale, filter }}
-                >
-                    <div className="orb-swirl absolute -inset-1/4" />
-                    <div className="orb-highlight absolute" />
-                </motion.div>
-            </div>
+        <div className="relative size-[300px] sm:size-[400px]" aria-hidden>
+            <canvas ref={ref} className="absolute inset-0 size-full" />
         </div>
     );
 };
@@ -139,30 +284,13 @@ const Orb = ({ energy, ripples }: { energy: MotionValue<number>; ripples: number
 
 const Journal = () => {
     const { energy, bump } = useTypingEnergy();
-    const [ripples, setRipples] = useState<number[]>([]);
-    const lastRipple = useRef(0);
 
     const [text, setText] = useState('');
     const [tags, setTags] = useState<string[]>([]);
     const [tagDraft, setTagDraft] = useState('');
     const [entries, setEntries] = useState<Entry[]>(loadEntries);
 
-    const spawnRipple = useCallback((force = false) => {
-        const now = performance.now();
-        if (!force && now - lastRipple.current < 140) return;
-        lastRipple.current = now;
-        const id = now + Math.random();
-        setRipples((r) => [...r.slice(-6), id]);
-        window.setTimeout(() => setRipples((r) => r.filter((x) => x !== id)), 1500);
-    }, []);
-
-    const pulse = useCallback(
-        (amount: number) => {
-            bump(amount);
-            spawnRipple();
-        },
-        [bump, spawnRipple],
-    );
+    const pulse = bump;
 
     const addTag = (raw: string) => {
         const tag = normalizeTag(raw);
@@ -198,7 +326,6 @@ const Journal = () => {
         setTags([]);
         setTagDraft('');
         bump(1);
-        [0, 180, 360].forEach((d) => window.setTimeout(() => spawnRipple(true), d));
     };
 
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -216,13 +343,13 @@ const Journal = () => {
                 <span className="text-sm text-muted-foreground">{today}</span>
             </header>
 
-            <main className="relative z-10 mx-auto flex w-full max-w-xl flex-col items-center gap-12 px-5 pb-20 pt-6 sm:pt-10">
+            <main className="relative z-10 mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-5 pb-20 pt-2 sm:pt-4">
                 <motion.div
                     initial={{ opacity: 0, scale: 0.85 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
                 >
-                    <Orb energy={energy} ripples={ripples} />
+                    <Nebula energy={energy} />
                 </motion.div>
 
                 <motion.section

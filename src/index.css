@@ -133,66 +133,6 @@
     box-shadow: 0 0 5px hsl(var(--foreground) / 0.7);
   }
 
-  /* Orb */
-  .orb-glow {
-    background: radial-gradient(
-      circle,
-      hsl(var(--neon-purple) / 0.55) 0%,
-      hsl(var(--neon-indigo) / 0.3) 35%,
-      hsl(var(--neon-cyan) / 0.12) 55%,
-      transparent 70%
-    );
-    filter: blur(30px);
-  }
-  .orb-core {
-    background: radial-gradient(
-      circle at 35% 30%,
-      hsl(var(--foreground) / 0.95) 0%,
-      hsl(var(--neon-cyan) / 0.9) 12%,
-      hsl(var(--neon-indigo)) 42%,
-      hsl(var(--neon-purple)) 72%,
-      hsl(var(--space-indigo)) 100%
-    );
-    box-shadow:
-      0 0 60px hsl(var(--neon-purple) / 0.6),
-      0 0 120px hsl(var(--neon-indigo) / 0.4),
-      inset -20px -30px 60px hsl(var(--space-deep) / 0.6),
-      inset 10px 10px 40px hsl(var(--neon-cyan) / 0.35);
-  }
-  .orb-swirl {
-    background: conic-gradient(
-      from 0deg,
-      transparent,
-      hsl(var(--neon-cyan) / 0.5),
-      transparent 30%,
-      hsl(var(--neon-purple) / 0.55),
-      transparent 60%,
-      hsl(var(--neon-indigo) / 0.55),
-      transparent
-    );
-    mix-blend-mode: screen;
-    filter: blur(14px);
-    animation: orb-spin 14s linear infinite;
-  }
-  .orb-highlight {
-    top: 12%;
-    left: 20%;
-    width: 35%;
-    height: 25%;
-    border-radius: 50%;
-    background: radial-gradient(ellipse, hsl(var(--foreground) / 0.55), transparent 70%);
-    filter: blur(6px);
-  }
-  .orb-ring {
-    border: 1px solid hsl(var(--neon-cyan) / 0.6);
-    box-shadow:
-      0 0 20px hsl(var(--neon-purple) / 0.5),
-      inset 0 0 20px hsl(var(--neon-cyan) / 0.3);
-  }
-  .orb-breathe {
-    animation: orb-breathe 6s var(--ease-calm) infinite;
-  }
-
   /* Journal */
   .glass-focus {
     transition: border-color 0.4s var(--ease-calm), box-shadow 0.4s var(--ease-calm);
@@ -253,15 +193,8 @@
   0%, 100% { opacity: 0.2; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1); }
 }
-@keyframes orb-spin {
-  to { transform: rotate(360deg); }
-}
-@keyframes orb-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.04); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .star, .orb-swirl, .orb-breathe { animation: none; }
+  .star { animation: none; }
 }
 
 /* Wallet adapter modal — themed to the night sky */
